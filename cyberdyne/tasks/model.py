@@ -37,6 +37,8 @@ class TaskStep:
             skill = d.pop("skill")
             if skill == "goto":
                 return cls("goto", dict(d.get("args") or {}), note=d.get("note", ""))
+            if skill == "task":
+                return cls("task", dict(d.get("args") or {}), note=d.get("note", ""))
             return cls("skill", {"skill": skill, "args": dict(d.get("args") or {})}, note=d.get("note", ""))
         return cls(d["kind"], dict(d.get("args") or {}), float(d.get("timeout", 120.0)),
                    int(d.get("retries", 1)), str(d.get("note", "")))

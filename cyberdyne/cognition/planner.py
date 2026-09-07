@@ -34,9 +34,24 @@ class Planner(ABC):
     async def plan(self, goal: str, context: dict) -> Plan: ...
 
 
+_SEQ = re.compile(r"\s*(?:,?\s+then\s+|,?\s+tarpor\s+|,?\s+ar\s+|,?\s+and then\s+|\s*;\s*)\s*")
+
+
 class RulePlanner(Planner):
     async def plan(self, goal: str, context: dict) -> Plan:
         g = goal.lower().strip()
+        parts = [x for x in _SEQ.split(g) if x]
+        if len(parts) > 1:                                      # hierarchical: decompose, plan each, concatenate
+            subplans = [await self.plan(part, context) for part in parts]
+            failed = [sp for sp in subplans if not sp.steps]
+            if failed:
+                return Plan(goal, [], "could not plan: " + "; ".join(f"'{sp.goal}' ({sp.rationale})" for sp in failed))
+            return Plan(goal, [st for sp in subplans for st in sp.steps],
+                        " then ".join(f"[{sp.goal}: {sp.rationale}]" for sp in subplans))
+        tasks = context.get("tasks") or []
+        if g in tasks or g.removeprefix("run ").removeprefix("do ") in tasks:
+            name = g.removeprefix("run ").removeprefix("do ")
+            return Plan(goal, [PlanStep("task", {"name": name})], f"'{name}' is a library task")
         if g in ("charge", "go charge", "recharge"):
             c = context["charger"]
             return Plan(goal, [PlanStep("goto", {"x": c["x"], "y": c["y"], "name": "charger"})],

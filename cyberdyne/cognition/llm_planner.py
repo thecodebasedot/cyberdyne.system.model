@@ -39,6 +39,12 @@ class LLMPlanner(Planner):
             data = resp.json()
             steps = [PlanStep(str(s["skill"]), dict(s.get("args") or {}), str(s.get("note", "")))
                      for s in data.get("steps", [])]
+            if not steps:                                  # the model passed; let the rules have a go
+                rule_plan = await self.fallback.plan(goal, context)
+                if rule_plan.steps:
+                    self.fallbacks += 1
+                    rule_plan.rationale = f"[rules; model returned no steps] {rule_plan.rationale}"
+                    return rule_plan
             return Plan(goal, steps, str(data.get("rationale", "")) or "llm")
         except (LLMError, ValueError, KeyError, TypeError) as exc:
             self.fallbacks += 1

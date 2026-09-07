@@ -57,7 +57,7 @@ _RULES: list[tuple[re.Pattern, str, callable]] = [
     (re.compile(r"^(?:go to|goto|go near|jao|cholo)\s+(?:the )?([a-z][\w ]*?)$"), "plan",
      lambda m: {"goal": f"goto {m[1]}"}),
     (re.compile(r"^(?:the )?([a-z][\w ]*?)(?:-?e| te| er kache)\s+(?:jao|cholo|jaw)$"), "plan",
-     lambda m: {"goal": f"goto {m[1]}"}),
+     lambda m: {"goal": f"goto {m[1].strip()}"}),
     (re.compile(r"^(?:arm|arm security|security on|pahara dao)$"), "arm", lambda m: {"armed": True}),
     (re.compile(r"^(?:disarm|security off|pahara bondho)$"), "arm", lambda m: {"armed": False}),
     (re.compile(r"^(?:turn on|switch on)\s+(?:the )?(?:(\w+) )?(light|fan|plug|door)s?$"), "device",
@@ -77,14 +77,34 @@ _RULES: list[tuple[re.Pattern, str, callable]] = [
     (re.compile(r"^(?:teach|shekho|record)\s+(\w+)$"), "teach", lambda m: {"action": "start", "name": m[1]}),
     (re.compile(r"^(?:done teaching|stop teaching|shekha shesh|stop recording)$"), "teach",
      lambda m: {"action": "stop"}),
+    (re.compile(r"^(?:what if|whatif|jodi)\s+(?:you |tumi )?(.+?)(?:\s+korte|\s+korle)?$"), "whatif",
+     lambda m: {"goal": m[1]}),
     (re.compile(r"^(?:plan|do|task|koro|kaj koro)\s+(.+)$"), "plan", lambda m: {"goal": m[1]}),
     (re.compile(r"^(?:patrol|patrol koro|ghuro|start patrol)$"), "plan", lambda m: {"goal": "patrol"}),
 ]
 
 
+BANGLA = {
+    "যাও": "jao", "চলো": "cholo", "থামো": "thamo", "থাম": "thamo", "বন্ধ করো": "bondho koro", "কোথায়": "kothay",
+    "আমার": "amar", "চাবি": "keys", "চার্জ করো": "charge koro", "চার্জ": "charge", "কয়টা বাজে": "koyta baje",
+    "কেমন আছো": "kemon acho", "কেন করলে": "keno korle", "মনে রাখো": "mone rakho", "ভুলে যাও": "bhule jao",
+    "কী দেখছো": "ki dekhcho", "রান্নাঘর": "kitchen", "রান্নাঘরে": "kitchen e", "বসার ঘরে": "living e",
+    "বসার ঘর": "living", "লাইট": "light", "বাতি": "bati", "পাখা": "pakha", "জ্বালাও": "jalao", "নিভাও": "nivao",
+    "হ্যাঁ": "ha", "না": "na", "পাহারা দাও": "pahara dao", "ঘুরো": "ghuro", "শেখো": "shekho",
+}
+
+
+def transliterate(text: str) -> str:
+    """Map common Bangla-script words to the romanised forms the rules know."""
+    out = text
+    for bn, ro in sorted(BANGLA.items(), key=lambda kv: -len(kv[0])):
+        out = out.replace(bn, ro)
+    return out
+
+
 class RuleInterpreter(Interpreter):
     def parse(self, text: str) -> Intent | None:
-        t = re.sub(r"\s+", " ", text.strip().lower()).rstrip(".!?")
+        t = re.sub(r"\s+", " ", transliterate(text).strip().lower()).rstrip(".!?।")
         for pattern, skill, extract in _RULES:
             m = pattern.match(t)
             if m:

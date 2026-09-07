@@ -72,3 +72,13 @@
 - [x] Sound-source bearing on utterances; idle robot turns to the speaker (`nav/face`)
 - [x] Affect lexicon (English + Banglish) -> `language/affect`, per-person mood in the user model
 - [x] PyBullet backend (`mode = "bullet"`): rigid-body robot, box obstacles, kinematic actors, ray-cast range, occlusion camera
+
+## Batch 3 — Cognition, memory, language gaps (done)
+- [x] Attention (salience ranking, `brain/attention`) and an *investigate* behaviour for salient alerts/anomalies
+- [x] Homeostatic drives (`brain/drives`) and curiosity-driven frontier exploration when idle
+- [x] Hierarchical goals: "A then B", "A ar B", library tasks as plan steps
+- [x] Counterfactuals: `whatif` skill / `Brain.whatif` (dry-run deliberation, compared to the current decision)
+- [x] Emotion-weighted episodic retrieval; idle-time consolidation ("dreaming") of repeated episodes into semantic facts
+- [x] Personality wrapper on speech (formality, verbosity, warmth, Bangla flavour)
+- [x] LLM critic on the council (can only lower confidence; never overrides the constitution); LLM-drafted macros through the same validator (`draft_skill`, gated by `self.modify`)
+- [x] Conversation context for the LLM interpreter; Bangla-script keywords for the rule interpreter

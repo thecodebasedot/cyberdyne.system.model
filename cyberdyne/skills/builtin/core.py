@@ -207,3 +207,19 @@ class DescribeSkill(Skill):
         scene = wm.scene if wm else {"summary": "no world model"}
         anomalies = [m.payload for m in ctx.bus.history("world/anomaly", 5)]
         return SkillResult(True, {"scene": scene, "anomalies": anomalies, "speech": scene.get("summary", "")})
+
+
+class WhatIfSkill(Skill):
+    manifest = SkillManifest("whatif", description="Counterfactual: what would you do for this goal (no action)",
+                             args={"goal": "hypothetical goal"}, tags=("cognition",))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        brain = ctx.extras.get("brain")
+        goal = str(args.get("goal", "")).strip()
+        if brain is None or brain.council is None or not goal:
+            return SkillResult(False, error="whatif needs a goal and the brain")
+        r = await brain.whatif(goal)
+        verdict = "I would do it" if r["would_approve"] else "I would not do it"
+        why = ("; ".join(v["rule"] for v in r["violations"]) or "; ".join(r["critique"])
+               or f"{r['confidence']:.0%} confident")
+        return SkillResult(True, {**r, "speech": f"If you asked me to {goal}: {verdict} ({why})."})

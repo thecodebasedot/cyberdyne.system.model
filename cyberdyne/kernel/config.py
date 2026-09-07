@@ -53,6 +53,15 @@ class WorldConfig:
 
 
 @dataclass
+class PersonalityConfig:
+    name: str = "Cyberdyne"
+    formality: float = 0.5           # 0 casual .. 1 formal
+    verbosity: float = 0.5           # 0 terse .. 1 chatty
+    warmth: float = 0.5              # 0 cold .. 1 warm
+    language: str = "en"             # "en" | "bn" (romanised) flavour for fillers
+
+
+@dataclass
 class PerceptionConfig:
     fuse_pose: bool = True                 # EKF over odometry + IMU + wall landmarks
     predict_horizon: float = 1.5           # seconds ahead for people's motion prediction
@@ -108,6 +117,7 @@ class BrainConfig:
     effort: str = "high"              # planner effort; the interpreter always runs at "low"
     confidence_threshold: float = 0.6 # below this the brain asks the human before acting
     question_timeout: float = 120.0   # seconds an unanswered question stays open
+    explore_above: float = 0.15       # curiosity drive above which an idle robot explores frontiers
 
 
 @dataclass
@@ -126,6 +136,7 @@ class RobotConfig:
     brain: BrainConfig = field(default_factory=BrainConfig)
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
+    personality: PersonalityConfig = field(default_factory=PersonalityConfig)
     social: SocialConfig = field(default_factory=SocialConfig)
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
     home: HomeConfig = field(default_factory=HomeConfig)
@@ -149,6 +160,7 @@ class RobotConfig:
             brain=BrainConfig(**d.get("brain", {})),
             dashboard=DashboardConfig(**d.get("dashboard", {})),
             perception=PerceptionConfig(**d.get("perception", {})),
+            personality=PersonalityConfig(**d.get("personality", {})),
             social=SocialConfig(**d.get("social", {})),
             hardware=HardwareConfig(**d.get("hardware", {})),
             home=HomeConfig(**d.get("home", {})),

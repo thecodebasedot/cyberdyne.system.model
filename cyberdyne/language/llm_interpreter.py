@@ -27,18 +27,23 @@ class LLMInterpreter(Interpreter):
         self.min_confidence = min_confidence
         self.skills = skills or []
         self.llm_calls = 0
+        self.history: list[str] = []            # last utterances, for context ("do that again", "and the fan")
+        self.history_len = 5
 
     def parse(self, text: str) -> Intent | None:
         return self.rules.parse(text)
 
     async def parse_async(self, text: str) -> Intent | None:
         intent = self.rules.parse(text)
+        self.history = (self.history + [text])[-self.history_len:]
         if intent is not None:
             return intent
         self.llm_calls += 1
         skills = "\n".join(f"- {s['name']}: {s['description']} args={json.dumps(s['args'])}" for s in self.skills)
+        context = "\n".join(f"- {h}" for h in self.history[:-1])
+        prompt = f"PREVIOUS UTTERANCES:\n{context or '- (none)'}\n\nUTTERANCE: {text}"
         try:
-            resp = await self.backend.complete(SYSTEM.replace("{skills}", skills), text, effort="low",
+            resp = await self.backend.complete(SYSTEM.replace("{skills}", skills), prompt, effort="low",
                                                max_tokens=400)
             data = resp.json()
         except (LLMError, ValueError) as exc:

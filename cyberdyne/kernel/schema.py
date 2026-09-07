@@ -54,6 +54,9 @@ SCHEMAS: dict[str, Any] = {
     "world/observe": {"id": "str", "kind": "str", "x": "float", "y": "float", "attrs": "any"},
     "sim/hear": {"text": "str", "signature": "str?", "loudness": "float?"},
     "nav/face": {"bearing": "float"},
+    "brain/drives": {"energy": "float", "curiosity": "float", "social": "float", "safety": "float", "dominant": "str"},
+    "brain/attention": {"top": "any", "focus": "any"},
+    "memory/dream": {"facts": "any"},
     "fleet/peers": [{"robot": "str", "last_seen": "float", "state": "any", "pose": "any", "battery": "any"}],
 }
 

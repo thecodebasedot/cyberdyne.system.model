@@ -35,6 +35,11 @@ class MemoryModule(Module):
         self.semantic = KnowledgeGraph()
         self.semantic.add("self", "name", ctx.config.name, "config", ctx.now)
         self._subs = [ctx.bus.subscribe(t, self._on_event, name=f"memory.{t}") for t in _WATCH]
+        self._subs.append(ctx.bus.subscribe("language/affect", self._on_affect, name="memory.affect"))
+        self._valence, self._valence_ts = 0.0, -1e9
+        self._idle_since: float | None = None
+        self.dreams = 0
+        self.dream_after = 20.0                 # seconds of IDLE/CHARGING before consolidating
         ctx.extras["memory"] = self
 
     async def teardown(self) -> None:
@@ -47,7 +52,11 @@ class MemoryModule(Module):
             summary = fmt(msg.payload)
         except Exception:  # noqa: BLE001
             summary = f"{msg.topic}: {msg.payload!r}"[:120]
-        self.episodic.remember(msg.ts, msg.topic, summary, importance, payload=msg.payload)
+        self.episodic.remember(msg.ts, msg.topic, summary, importance, valence=self._valence, payload=msg.payload)
+
+    def _on_affect(self, msg) -> None:
+        self._valence = float(msg.payload.get("mood", 0.0))
+        self._valence_ts = msg.ts
 
     def forget(self, about: str) -> dict:
         """Privacy primitive: erase everything mentioning ``about`` from every store."""
@@ -62,6 +71,23 @@ class MemoryModule(Module):
 
     async def tick(self, dt: float) -> None:
         self.working.sweep()
+        now = self.ctx.now
+        if now - self._valence_ts > 60:
+            self._valence = 0.0                 # moods fade
+        state = self.ctx.state.state.value
+        if state in ("idle", "charging"):
+            self._idle_since = self._idle_since if self._idle_since is not None else now
+            if now - self._idle_since >= self.dream_after:
+                self._idle_since = now
+                facts = self.episodic.consolidate_into_facts(now)
+                if facts:
+                    self.dreams += 1
+                    for s_, p_, o_, n in facts:
+                        self.semantic.add(s_, p_, f"{o_} (x{n})", "dream", now)
+                    self.ctx.safety.audit.record(now, "memory", "consolidate", facts=len(facts))
+                    await self.ctx.bus.publish("memory/dream", {"facts": [list(f) for f in facts]}, source=self.name)
+        else:
+            self._idle_since = None
         await self.ctx.bus.publish("memory/summary", {"episodes": len(self.episodic),
                                                       "facts": len(self.semantic),
                                                       "working": len(self.working.to_dict())},

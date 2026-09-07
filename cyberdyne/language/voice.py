@@ -14,6 +14,7 @@ from ..hal.interfaces import DeviceKind, Microphone, Speaker
 from ..kernel.context import Context
 from ..kernel.module import Module
 from .affect import mood
+from .personality import Personality
 
 
 class VoiceModule(Module):
@@ -31,6 +32,8 @@ class VoiceModule(Module):
                                 re.I)
         self._queue: list[tuple[str, str]] = []
         self.heard = self.ignored = self.said = 0
+        self.personality = Personality(ctx.config.personality)
+        self._last_speaker: str | None = None
         self._subs = [ctx.bus.subscribe("speech/say", self._on_say, name="voice.say"),
                       ctx.bus.subscribe("brain/question", self._on_question, name="voice.question")]
         if cfg.speak_results:
@@ -49,7 +52,7 @@ class VoiceModule(Module):
 
     def _on_result(self, msg) -> None:
         p = msg.payload or {}
-        spoken = ("echo", "status", "time", "find", "explain", "describe", "device", "remind")
+        spoken = ("echo", "status", "time", "find", "explain", "describe", "device", "remind", "whatif")
         if p.get("skill") in spoken and p.get("ok"):
             out = p.get("output")
             text = out if isinstance(out, str) else (out.get("speech") if isinstance(out, dict) else None)
@@ -74,6 +77,7 @@ class VoiceModule(Module):
                                       source=self.name)
                     continue
                 self.heard += 1
+                self._last_speaker = person.name if person else None
                 score, words = mood(u.text)
                 if words:
                     await bus.publish("language/affect", {"speaker": person.name if person else None,
@@ -87,6 +91,7 @@ class VoiceModule(Module):
                                    "confirmed": False}, source=self.name)
         while self._queue:
             text, voice = self._queue.pop(0)
+            text = self.personality.wrap(text, self._last_speaker if voice != "friendly" else None, voice)
             if self.speaker:
                 await self.speaker.say(text, voice)
             self.said += 1

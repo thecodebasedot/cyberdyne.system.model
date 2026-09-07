@@ -40,6 +40,8 @@ class Constitution:
         if len(plan.steps) > self.max_steps:
             v.append(RuleViolation("max_steps", None, f"{len(plan.steps)} > {self.max_steps}"))
         for i, step in enumerate(plan.steps):
+            if step.skill == "task":
+                continue                                   # library task: validated when its steps run
             if self.known_skills is not None and step.skill not in self.known_skills:
                 v.append(RuleViolation("unknown_skill", i, step.skill))
                 continue

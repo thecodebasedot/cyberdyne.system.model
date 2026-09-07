@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import logging
 
+from .cognition.attention import AttentionModule
 from .cognition.brain import Brain
+from .cognition.drives import DrivesModule
 from .cognition.llm import LLMBackend, build_backend
 from .cognition.llm_planner import LLMPlanner
 from .hal.registry import DeviceRegistry
@@ -181,7 +183,8 @@ class Runtime:
         self.brain = Brain(planner)
         # SkillRunner registers before Brain so the constitution sees the skill list at setup.
         mods = [SafetyGate(), self.watchdog, self.governor, self.reloader, SensorHub(), RangePerception(),
-                self.world_model, MotionController(), SkillRunner(registry), self.tasks, self.brain,
+                self.world_model, MotionController(), SkillRunner(registry), self.tasks, DrivesModule(),
+                AttentionModule(), self.brain,
                 LanguageModule(interpreter), RoutineModule(), MemoryModule(), self.user_model, DemoRecorder(),
                 OpsModule(), self.telemetry]
         from .hal.interfaces import DeviceKind

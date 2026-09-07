@@ -19,7 +19,7 @@ from ..kernel.module import Module
 from ..kernel.state import SystemState
 from .behavior_tree import Action, Condition, Selector, Sequence, Status
 from .constitution import Constitution
-from .council import Council, Decision
+from .council import Council, Decision, LLMCritic
 from .planner import Plan, Planner, RulePlanner
 from .simulate import MentalSimulator
 
@@ -40,6 +40,8 @@ class Brain(Module):
         self.council: Council | None = None
         self.pending: Decision | None = None
         self.pending_since = 0.0
+        self.investigations = 0
+        self.explorations = 0
 
     async def setup(self, ctx: Context) -> None:
         self.ctx = ctx
@@ -62,18 +64,23 @@ class Brain(Module):
         skills = ctx.extras.get("skills")
         constitution = Constitution(ctx.config, ctx.safety.permissions,
                                     set(skills.names()) if skills else None)
+        llm = ctx.extras.get("llm")
         self.council = Council(ctx, self.planner, constitution, MentalSimulator(ctx.config),
-                               cfg.confidence_threshold)
+                               cfg.confidence_threshold, LLMCritic(llm) if llm is not None else None)
         self.tree = Selector(
             "root",
             Sequence("estop", Condition("estop engaged", lambda bb: bb["estop"]),
                      Action("hold", self._hold)),
             Sequence("charge", Condition("battery low", lambda bb: bb["need_charge"]),
                      Action("go to charger", self._go_charge)),
+            Sequence("investigate", Condition("salient alert", lambda bb: bb["focus"] is not None),
+                     Action("investigate", self._investigate)),
             Sequence("task", Condition("has task", lambda bb: bb["has_task"]),
                      Action("supervise task", self._supervise)),
             Sequence("patrol", Condition("has patrol", lambda bb: bool(self.patrol)),
                      Action("patrol", self._patrol)),
+            Sequence("explore", Condition("curious", lambda bb: bb["curious"]),
+                     Action("explore frontier", self._explore)),
             Action("idle", self._idle),
         )
         ctx.extras["brain"] = self
@@ -172,6 +179,9 @@ class Brain(Module):
                 "battery": batt,
                 "need_charge": low or topping_up,
                 "has_task": bool((bus.latest_payload("task/status") or {}).get("active")),
+                "focus": (bus.latest_payload("brain/attention") or {}).get("focus"),
+                "curious": ((bus.latest_payload("brain/drives") or {}).get("dominant") == "curiosity"
+                            and (bus.latest_payload("brain/drives") or {}).get("curiosity", 0) > cfg.explore_above),
                 "task": (bus.latest_payload("task/status") or {}).get("task"),
                 "pose": bus.latest_payload("sensor/odometry")}
 
@@ -238,6 +248,76 @@ class Brain(Module):
             await self._set_goal(wp["x"], wp["y"], f"waypoint_{self.patrol_idx}")
             await self._set_state(SystemState.ACTIVE, "patrol")
         return Status.RUNNING
+
+    async def _investigate(self, bb: dict) -> Status:
+        """Go and look at the most salient alert/anomaly, then mark it handled."""
+        focus = bb["focus"]
+        att = self.ctx.extras.get("attention")
+        if self.mode != "investigate":
+            self.mode = "investigate"
+            self._arrived = False
+            self.current_goal = None
+            self.investigations += 1
+            self.ctx.safety.audit.record(self.ctx.now, "brain", "investigate", key=focus["key"], topic=focus["topic"])
+        if self._arrived:
+            self._arrived = False
+            self.current_goal = None
+            if att:
+                att.mark_handled(focus["key"])
+            await self.ctx.bus.publish("brain/investigated", {"key": focus["key"]}, source=self.name)
+            await self.ctx.bus.publish("speech/say", {"text": "I checked it out.", "voice": "neutral"},
+                                       source=self.name)
+            self.mode = "idle"
+            return Status.SUCCESS
+        if self.current_goal is None:
+            x, y = focus.get("x"), focus.get("y")
+            if x is None:
+                wm = self.ctx.extras.get("world_model")
+                e = wm.find(focus.get("id", "")) if wm else None
+                if e is None:
+                    if att:
+                        att.mark_handled(focus["key"])
+                    return Status.FAILURE
+                x, y = e["x"], e["y"]
+            await self._set_goal(x, y, "investigate")
+            await self._set_state(SystemState.ACTIVE, f"investigating {focus['topic']}")
+        return Status.RUNNING
+
+    async def _explore(self, bb: dict) -> Status:
+        """Curiosity: drive to the nearest frontier between known-free and unknown space."""
+        wm = self.ctx.extras.get("world_model")
+        pose = bb.get("pose")
+        if self.mode != "explore":
+            self.mode = "explore"
+            self._arrived = False
+            self.current_goal = None
+        if self._arrived:
+            self._arrived = False
+            self.current_goal = None
+        if self.current_goal is None:
+            if wm is None or pose is None:
+                return Status.FAILURE
+            fr = wm.grid.frontiers()
+            if not fr:
+                return Status.FAILURE
+            fr.sort(key=lambda p: (p[0] - pose["x"]) ** 2 + (p[1] - pose["y"]) ** 2)
+            # skip frontiers too close to bother with
+            target = next((p for p in fr if (p[0] - pose["x"]) ** 2 + (p[1] - pose["y"]) ** 2 > 1.0), fr[-1])
+            self.explorations += 1
+            await self._set_goal(target[0], target[1], "frontier")
+            await self._set_state(SystemState.ACTIVE, "exploring")
+        return Status.RUNNING
+
+    async def whatif(self, goal: str) -> dict:
+        """Counterfactual: what would I do for this goal, without doing it."""
+        d = await self.council.deliberate(goal, dry_run=True)
+        current = self.council.history[-1] if self.council.history else None
+        return {"goal": goal, "would_approve": d.approved, "confidence": round(d.confidence, 2),
+                "steps": [s.__dict__ for s in d.plan.steps], "violations": [v.to_dict() for v in d.violations],
+                "prediction": d.rollout.to_dict() if d.rollout else None, "critique": d.critique,
+                "compared_to": ({"goal": current.goal, "confidence": round(current.confidence, 2),
+                                 "prediction": current.rollout.to_dict() if current.rollout else None}
+                                if current else None)}
 
     async def _idle(self, bb: dict) -> Status:
         self.mode = "idle"

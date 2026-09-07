@@ -52,6 +52,20 @@ class OccupancyGrid:
                     out.append((c, r))
         return out
 
+    def frontiers(self, unknown_band: float = 0.3) -> list[tuple[float, float]]:
+        """Centres of free cells that touch unknown cells: where exploring pays off."""
+        out = []
+        for r in range(1, self.rows - 1):
+            for c in range(1, self.cols - 1):
+                lo = self.cells[r * self.cols + c]
+                if lo >= -unknown_band:
+                    continue                                    # not confidently free
+                for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    if abs(self.cells[(r + dr) * self.cols + c + dc]) <= unknown_band:
+                        out.append(((c + 0.5) * self.res, (r + 0.5) * self.res))
+                        break
+        return out
+
     def explored_fraction(self) -> float:
         known = sum(1 for v in self.cells if abs(v) > 0.3)
         return known / len(self.cells)

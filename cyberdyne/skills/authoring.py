@@ -104,3 +104,43 @@ class DefineSkill(Skill):
         ctx.safety.audit.record(ctx.now, "skills", "define", name=macro.manifest.name, steps=len(macro.steps))
         await ctx.bus.publish("skill/defined", macro.to_dict(), source="skill.define_skill")
         return SkillResult(True, {"defined": macro.manifest.name, "speech": f"New skill {macro.manifest.name} ready."})
+
+
+DRAFT_SYSTEM = """You design a MACRO skill for a home robot: a short list of steps using ONLY existing skills.
+Reply with ONE JSON object: {"name": "<lowercase_identifier>", "description": "<text>",
+ "params": {"<param>": "<description>"}, "steps": [{"kind": "goto", "args": {"x": 1.0, "y": 2.0}} |
+ {"kind": "skill", "args": {"skill": "<name>", "args": {...}}} | {"kind": "wait", "args": {"seconds": 2}}]}
+Argument values may be templates like "{param}". Never target keep-out zones. Never use estop_reset or define_skill.
+Available skills and places are in the request."""
+
+
+class DraftSkill(Skill):
+    """Ask the model to draft a macro, then put it through exactly the same validation as a human-authored one."""
+    manifest = SkillManifest("draft_skill", description="Let the model draft a macro skill from a description",
+                             action="self.modify", args={"description": "what the new skill should do",
+                                                         "name": "optional identifier"}, tags=("meta", "llm"))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        import json
+
+        from ..cognition.llm import LLMError
+        backend = ctx.extras.get("llm")
+        if backend is None:
+            return SkillResult(False, error="no LLM backend configured")
+        registry = ctx.extras["skills"]
+        wm = ctx.extras.get("world_model")
+        req = {"request": str(args.get("description", "")), "suggested_name": args.get("name"),
+               "skills": [{"name": s["name"], "args": s["args"]} for s in registry.describe()
+                          if s["name"] not in ("define_skill", "draft_skill", "estop_reset")],
+               "places": wm.places() if wm else {}, "keep_out": ctx.config.safety.keep_out}
+        try:
+            spec = (await backend.complete(DRAFT_SYSTEM, json.dumps(req, default=str), effort="high")).json()
+        except (LLMError, ValueError) as exc:
+            return SkillResult(False, error=f"draft failed: {exc}")
+        spec.setdefault("name", args.get("name") or "drafted")
+        ctx.safety.audit.record(ctx.now, "skills", "draft", name=spec.get("name"), steps=len(spec.get("steps") or []))
+        define = registry.get("define_skill")
+        result = await define.run(ctx, {**spec, "confirmed": True})
+        if result.ok:
+            result.output["drafted"] = spec
+        return result
