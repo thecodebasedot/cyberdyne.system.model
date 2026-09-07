@@ -23,7 +23,7 @@ class SafetyCore:
         self.cfg = cfg
         self.envelope = SafetyEnvelope(cfg)
         self.estop = EStop()
-        self.permissions = PermissionPolicy(cfg.permissions)
+        self.permissions = PermissionPolicy(cfg.permissions, cfg.guest_max_tier, cfg.unknown_max_tier)
         self.audit = AuditLog()
 
     def describe(self) -> dict:
@@ -97,6 +97,7 @@ class SafetyGate(Module):
         clearance = clr_msg.payload if clr_msg else None
         lin, ang, viol = self.core.envelope.clamp(lin, ang, pose=odom, front_clearance=clearance)
         # Never drive forward on perception that has gone quiet: the world may have changed.
+        # (The same rule order is exercised exhaustively by safety.verify.gate_decision.)
         if lin > 0 and (clr_msg is None or self.ctx.now - clr_msg.ts > self.core.cfg.perception_stale):
             age = None if clr_msg is None else round(self.ctx.now - clr_msg.ts, 2)
             viol.append(Violation("perception_stale", f"age={age}"))

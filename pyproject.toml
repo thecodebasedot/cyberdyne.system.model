@@ -13,6 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.4"]
+llm = ["anthropic>=1.0"]
 
 [project.scripts]
 cyberdyne = "cyberdyne.cli:main"

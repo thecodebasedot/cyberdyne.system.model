@@ -1,8 +1,15 @@
 """Fleet layer (Phase 5): multi-robot coordination.
 
-Reserved. The wire format is the bus ``Message`` serialised to JSON; a
-``FleetBridge`` module will mirror selected topics between robots.
+    transport   FleetMessage + Transport ABC, InMemoryTransport, UDPTransport
+    bridge      FleetBridge module: presence, topic mirroring, LWW entity sync
+    auction     AuctionModule: sealed-bid task allocation
+    sim         FleetSim: lock-step multi-robot simulation on one clock
 """
+from .auction import AuctionModule
+from .bridge import FleetBridge
 from .interfaces import FleetMessage, Transport
+from .sim import FleetSim
+from .transport import InMemoryTransport, UDPTransport
 
-__all__ = ["FleetMessage", "Transport"]
+__all__ = ["AuctionModule", "FleetBridge", "FleetMessage", "Transport", "FleetSim", "InMemoryTransport",
+           "UDPTransport"]

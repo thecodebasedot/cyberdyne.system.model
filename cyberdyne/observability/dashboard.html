@@ -31,6 +31,14 @@
    <button onclick="say()">SEND</button></div>
    <div class="row" style="color:var(--dim)">click the map to set a goal</div></section>
   <section><h2>Brain</h2><table id="brain"></table></section>
+  <section id="qbox" hidden><h2 style="color:var(--amber)">Robot asks</h2><div id="question"></div>
+   <div class="row"><input id="ans" placeholder="proceed / cancel / a new goal" onkeydown="if(event.key==='Enter')answer()">
+   <button class="ok" onclick="answer('proceed')">PROCEED</button><button class="danger" onclick="answer('cancel')">CANCEL</button>
+   <button onclick="answer()">SEND</button></div></section>
+  <section><h2>Council</h2><table id="council"></table></section>
+  <section><h2>Social</h2><table id="social"></table></section>
+  <section><h2>Tasks &amp; Home</h2><table id="tasks"></table></section>
+  <section><h2>Fleet &amp; Ops</h2><table id="fleet"></table></section>
  </div>
  <div class="stack">
   <section><h2>Robot</h2><table id="robot"></table><div class="meter"><i id="batt" style="width:0"></i></div></section>
@@ -44,6 +52,7 @@ const $=id=>document.getElementById(id);
 const cv=$('c'),cx=cv.getContext('2d');let S=null;
 async function post(p,b){await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})}
 function say(){const v=$('say').value.trim();if(!v)return;post('/api/say',{text:v});$('say').value=''}
+function answer(a){const v=a||$('ans').value.trim();if(!v)return;post('/api/answer',{answer:v,id:S&&S.question?S.question.id:null});$('ans').value=''}
 cv.addEventListener('click',e=>{if(!S||!S.world)return;const r=cv.getBoundingClientRect();const w=S.world;
  const x=(e.clientX-r.left)/r.width*w.width,y=(1-(e.clientY-r.top)/r.height)*w.height;post('/api/goal',{x:+x.toFixed(2),y:+y.toFixed(2)})});
 function kv(id,obj){const t=$(id);t.innerHTML='';for(const k in obj){const tr=t.insertRow();tr.insertCell().textContent=k;
@@ -54,7 +63,10 @@ function draw(){if(!S||!S.world)return;const w=S.world,sx=cv.width/w.width,sy=cv
  for(let j=0;j<=w.height;j++){cx.beginPath();cx.moveTo(0,Y(j));cx.lineTo(cv.width,Y(j));cx.stroke()}
  if(S.world_model){cx.fillStyle='rgba(255,176,32,.25)';const g=S.world_model.grid;for(const [c,r] of g.occupied)cx.fillRect(c*g.res*sx,Y((r+1)*g.res),g.res*sx,g.res*sy)}
  for(const z of (S.safety.keep_out||[])){cx.fillStyle='rgba(255,59,59,.15)';cx.strokeStyle='#ff3b3b';cx.fillRect(z.x*sx,Y(z.y+z.h),z.w*sx,z.h*sy);cx.strokeRect(z.x*sx,Y(z.y+z.h),z.w*sx,z.h*sy)}
+ if(S.world_model&&S.world_model.rooms)for(const rm of S.world_model.rooms){cx.strokeStyle='#1e3a4a';cx.setLineDash([2,6]);cx.strokeRect(rm.x*sx,Y(rm.y+rm.h),rm.w*sx,rm.h*sy);cx.setLineDash([]);cx.fillStyle='#2c4a5a';cx.fillText(rm.name.toUpperCase(),rm.x*sx+6,Y(rm.y+rm.h)+14)}
  cx.fillStyle='#233346';for(const o of w.obstacles)cx.fillRect(o.x*sx,Y(o.y+o.h),o.w*sx,o.h*sy);
+ for(const a of (w.actors||[])){cx.fillStyle=a.kind==='person'?'rgba(255,255,255,.15)':'rgba(255,176,32,.3)';cx.beginPath();cx.arc(a.x*sx,Y(a.y),a.radius*sx,0,7);cx.fill()}
+ for(const t of (S.tracks||[])){cx.strokeStyle=t.kind==='person'?'#ff7ab6':'#ffb020';cx.lineWidth=2;cx.beginPath();cx.arc(t.x*sx,Y(t.y),0.3*sx,0,7);cx.stroke();cx.lineWidth=1;cx.fillStyle='#ff7ab6';cx.fillText((t.signature?'':'?')+t.kind+'#'+t.track_id,t.x*sx+8,Y(t.y)+4)}
  cx.strokeStyle='#37d67a';cx.beginPath();cx.arc(w.charger.x*sx,Y(w.charger.y),w.charger.r*sx,0,7);cx.stroke();
  if(S.world_model)for(const e of S.world_model.entities){if(e.kind==='waypoint'){cx.fillStyle='#38bdf8';cx.beginPath();cx.arc(e.x*sx,Y(e.y),4,0,7);cx.fill();cx.fillText(e.id,e.x*sx+6,Y(e.y)-4)}}
  const r=w.robot;if(S.scan){cx.strokeStyle='rgba(56,189,248,.25)';for(const p of S.scan){cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));
@@ -72,6 +84,22 @@ async function poll(){try{S=await (await fetch('/api/state')).json();
   cmd:S.cmd,front_clearance:S.front_clearance!=null?S.front_clearance.toFixed(2)+' m':'-',collisions:S.world.collisions,distance:S.world.distance.toFixed(2)+' m',
   explored:S.world_model?S.world_model.grid.explored:'-',bus:S.bus.published+' msgs / '+S.bus.errors+' errors',memory:S.memory});
  kv('brain',S.brain||{});
+ const tk=S.task&&S.task.task;kv('tasks',{task:tk?`${tk.name} [${tk.status}] step ${tk.step+1}/${tk.steps}${tk.error?' '+tk.error:''}`:'idle',
+  done:S.task?S.task.completed:0,failed:S.task?S.task.failed:0,history:(S.task_history||[]).map(t=>t.name+':'+t.status).join(', '),
+  routines:(S.routines||[]).map(r=>r.name+(r.every?' every '+r.every+'s':'')+(r.at?' at '+r.at:'')+' x'+r.fired).join(', ')||'none',
+  devices:(S.devices||[]).map(d=>`${d.room} ${d.kind}=${d.state.on?'ON':'off'}`).join(', ')||'none',
+  recording:S.recorder?S.recorder.recording+' ('+S.recorder.steps+' steps)':'-',suggestion:S.suggestion?S.suggestion.person+': '+S.suggestion.request:'-'});
+ kv('fleet',{peers:(S.peers||[]).map(p=>`${p.robot} [${p.state}]${p.battery?' '+(p.battery.level*100).toFixed(0)+'%':''}`).join(', ')||'none',
+  auction:S.auction?`won ${S.auction.won} lost ${S.auction.lost} open ${S.auction.open.length}`:'-',
+  release:S.ops&&S.ops.active?`${S.ops.active.version} (${S.ops.active.hash})${S.ops.health_pending?' health check…':''}`:'none'});
+ for(const p of (S.peers||[])){if(p.pose){cx.strokeStyle='#7dd3fc';cx.beginPath();cx.arc(p.pose.x*sx,Y(p.pose.y),0.2*sx,0,7);cx.stroke();cx.fillStyle='#7dd3fc';cx.fillText(p.robot,p.pose.x*sx+8,Y(p.pose.y)-6)}}
+ kv('social',{room:S.room?S.room.name:'-',tracks:(S.tracks||[]).map(t=>t.kind+'#'+t.track_id+(t.signature?'':' (unknown)')).join(', ')||'none',
+  said:(S.speech||[]).map(x=>'"'+x.text+'"').join(' '),alerts:(S.alerts||[]).length});
+ $('qbox').hidden=!S.question;if(S.question)$('question').textContent=S.question.question+'  ['+S.question.options.join(' / ')+']';
+ const d=S.decision;kv('council',d?{goal:d.goal,approved:d.approved,confidence:(d.confidence*100).toFixed(0)+'%',rationale:d.plan.rationale,
+  steps:d.plan.steps.map(s=>s.skill+' '+JSON.stringify(s.args)).join(' → '),violations:d.violations.map(v=>v.rule+':'+v.detail).join(', ')||'none',
+  critique:d.critique.join('; ')||'none',prediction:d.rollout?`feasible=${d.rollout.feasible} t=${d.rollout.total_time}s d=${d.rollout.total_distance}m batt=${(d.rollout.battery_after*100).toFixed(0)}%`:'-',
+  llm:S.llm?`${S.llm.backend} ${S.llm.model||''} calls=${S.llm.calls||0}`:'rule-based'}:{status:'no deliberation yet'});
  const m=$('mods');m.innerHTML='';if(S.scheduler)for(const x of S.scheduler.modules){const tr=m.insertRow();tr.insertCell().textContent=x.name;
   const c=tr.insertCell();c.textContent=`${x.state} ${x.rate_hz}Hz ticks=${x.stats.ticks} faults=${x.stats.faults} restarts=${x.stats.restarts} miss=${x.stats.deadline_misses}`;c.style.color=x.state==='fault'?'#ff3b3b':''}
  $('events').innerHTML=S.recent.slice().reverse().map(r=>`<div><span style="color:var(--dim)">${r.ts.toFixed(2)}</span> <b>${r.topic}</b> ${JSON.stringify(r.payload)}</div>`).join('');

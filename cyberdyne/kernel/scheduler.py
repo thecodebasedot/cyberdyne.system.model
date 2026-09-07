@@ -111,6 +111,14 @@ class Scheduler:
         return self.stats
 
     # -- frame ---------------------------------------------------------------
+    async def frame(self, now: float) -> None:
+        """Run every due module once (used by lock-step harnesses such as FleetSim)."""
+        await self._frame(now)
+
+    def next_due(self, default: float) -> float:
+        live = [m.next_due for m in self.modules if m.state in (ModuleState.READY, ModuleState.RUNNING)]
+        return min(live) if live else default
+
     async def _frame(self, now: float) -> None:
         self.stats.frames += 1
         for m in self.modules:

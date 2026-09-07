@@ -18,10 +18,18 @@ from ..kernel.context import Context
 from ..kernel.module import Module
 from ..kernel.state import SystemState
 from .behavior_tree import Action, Condition, Selector, Sequence, Status
+from .constitution import Constitution
+from .council import Council, Decision
 from .planner import Plan, Planner, RulePlanner
+from .simulate import MentalSimulator
 
 
 class Brain(Module):
+    """Deliberative loop. Free-form goals go through the council (plan ->
+    constitution -> critic); only approved decisions become plans. Anything
+    the council is unsure about becomes a question on ``brain/question`` and
+    waits for ``human/answer``.
+    """
     name = "brain"
     rate_hz = 2.0
     priority = 50
@@ -29,6 +37,9 @@ class Brain(Module):
     def __init__(self, planner: Planner | None = None) -> None:
         super().__init__()
         self.planner = planner or RulePlanner()
+        self.council: Council | None = None
+        self.pending: Decision | None = None
+        self.pending_since = 0.0
 
     async def setup(self, ctx: Context) -> None:
         self.ctx = ctx
@@ -43,15 +54,24 @@ class Brain(Module):
         self._arrived = False
         self._subs = [ctx.bus.subscribe("nav/arrived", self._on_arrived, name="brain.arrived"),
                       ctx.bus.subscribe("brain/goal", self._on_goal, name="brain.goal"),
+                      ctx.bus.subscribe("human/answer", self._on_answer, name="brain.answer"),
+                      ctx.bus.subscribe("task/done", self._on_task_end, name="brain.task_done"),
+                      ctx.bus.subscribe("task/failed", self._on_task_end, name="brain.task_failed"),
+                      ctx.bus.subscribe("task/cancelled", self._on_task_end, name="brain.task_cancelled"),
                       ctx.bus.subscribe("safety/estop_state", self._on_estop, name="brain.estop")]
+        skills = ctx.extras.get("skills")
+        constitution = Constitution(ctx.config, ctx.safety.permissions,
+                                    set(skills.names()) if skills else None)
+        self.council = Council(ctx, self.planner, constitution, MentalSimulator(ctx.config),
+                               cfg.confidence_threshold)
         self.tree = Selector(
             "root",
             Sequence("estop", Condition("estop engaged", lambda bb: bb["estop"]),
                      Action("hold", self._hold)),
             Sequence("charge", Condition("battery low", lambda bb: bb["need_charge"]),
                      Action("go to charger", self._go_charge)),
-            Sequence("plan", Condition("has plan", lambda bb: bb["has_plan"]),
-                     Action("execute plan", self._run_plan)),
+            Sequence("task", Condition("has task", lambda bb: bb["has_task"]),
+                     Action("supervise task", self._supervise)),
             Sequence("patrol", Condition("has patrol", lambda bb: bool(self.patrol)),
                      Action("patrol", self._patrol)),
             Action("idle", self._idle),
@@ -67,17 +87,75 @@ class Brain(Module):
         self._arrived = True          # consumed by whichever leaf owns the goal
 
     async def _on_goal(self, msg) -> None:
-        goal = msg.payload["goal"] if isinstance(msg.payload, dict) else str(msg.payload)
-        ctx = {"charger": self.ctx.config.world.charger, "patrol": self.patrol}
-        self.plan = await self.planner.plan(goal, ctx)
-        self.plan_idx = 0
-        self.current_goal = None
-        await self.ctx.bus.publish("brain/plan", self.plan.to_dict(), source=self.name)
+        p = msg.payload if isinstance(msg.payload, dict) else {"goal": str(msg.payload)}
+        await self._deliberate(str(p["goal"]), bool(p.get("confirmed")))
+
+    async def _deliberate(self, goal: str, confirmed: bool = False) -> Decision:
+        d = await self.council.deliberate(goal, confirmed)
+        await self.ctx.bus.publish("brain/decision", d.to_dict(), source=self.name)
+        if d.approved:
+            await self._adopt(d)
+        else:
+            self.pending, self.pending_since = d, self.ctx.now
+            await self.ctx.bus.publish("brain/question", {"id": d.id, "question": d.question,
+                                                          "options": d.options, "goal": goal},
+                                       source=self.name)
+        return d
+
+    async def _adopt(self, d: Decision) -> None:
+        self.plan, self.plan_idx, self.current_goal, self.pending = d.plan, 0, None, None
+        self.ctx.safety.audit.record(self.ctx.now, "brain", "plan.adopt", goal=d.goal, decision=d.id)
+        await self.ctx.bus.publish("brain/plan", d.plan.to_dict(), source=self.name)
+        # Execution belongs to the task runner: it owns retries, timeouts, pause/resume.
+        await self.ctx.bus.publish("task/start", {"name": d.goal, "origin": "brain",
+                                                  "steps": [s.__dict__ for s in d.plan.steps]}, source=self.name)
+
+    async def _on_answer(self, msg) -> None:
+        p = msg.payload or {}
+        answer = str(p.get("answer", "")).strip().lower()
+        d = self.pending
+        if d is None or (p.get("id") is not None and p["id"] != d.id):
+            await self.ctx.bus.publish("brain/answer_ignored", {"answer": answer, "reason": "no open question"},
+                                       source=self.name)
+            return
+        self.ctx.safety.audit.record(self.ctx.now, "human", "answer", decision=d.id, answer=answer)
+        if answer in ("cancel", "no", "na", "stop"):
+            self.pending = None
+            await self.ctx.bus.publish("brain/question_closed", {"id": d.id, "outcome": "cancelled"},
+                                       source=self.name)
+        elif answer in ("proceed", "yes", "ok", "go", "ha"):
+            if d.hard_blocked or not d.plan.steps:
+                await self.ctx.bus.publish("brain/question_closed",
+                                           {"id": d.id, "outcome": "refused", "reason": "hard rule"},
+                                           source=self.name)
+                self.pending = None
+                return
+            d2 = await self.council.deliberate(d.goal, human_confirmed=True)   # re-check with confirmation
+            await self.ctx.bus.publish("brain/decision", d2.to_dict(), source=self.name)
+            if d2.hard_blocked or not d2.plan.steps:
+                self.pending = None
+                await self.ctx.bus.publish("brain/question_closed", {"id": d.id, "outcome": "refused"},
+                                           source=self.name)
+                return
+            await self._adopt(d2)
+            await self.ctx.bus.publish("brain/question_closed", {"id": d.id, "outcome": "proceed"},
+                                       source=self.name)
+        else:                                  # anything else is a new goal
+            self.pending = None
+            await self.ctx.bus.publish("brain/question_closed", {"id": d.id, "outcome": "regoal"},
+                                       source=self.name)
+            await self._deliberate(str(p.get("answer", "")))
+
+    async def _on_task_end(self, msg) -> None:
+        if msg.topic == "task/done":
+            await self.ctx.bus.publish("brain/plan_done", {"task": msg.payload}, source=self.name)
+        self.plan = None
 
     async def _on_estop(self, msg) -> None:
         if msg.payload["engaged"]:
             self.current_goal = None
             await self.ctx.bus.publish("nav/cancel", None, source=self.name)
+            await self.ctx.bus.publish("task/pause", {"reason": "estop"}, source=self.name)
             if self.ctx.state.can(SystemState.ESTOP):
                 await self.ctx.state.transition(SystemState.ESTOP, msg.payload["reason"])
         elif self.ctx.state.state == SystemState.ESTOP:
@@ -93,7 +171,8 @@ class Brain(Module):
         return {"estop": self.ctx.safety.estop.engaged,
                 "battery": batt,
                 "need_charge": low or topping_up,
-                "has_plan": self.plan is not None and self.plan_idx < len(self.plan.steps),
+                "has_task": bool((bus.latest_payload("task/status") or {}).get("active")),
+                "task": (bus.latest_payload("task/status") or {}).get("task"),
                 "pose": bus.latest_payload("sensor/odometry")}
 
     async def _set_goal(self, x: float, y: float, name: str) -> None:
@@ -115,6 +194,8 @@ class Brain(Module):
         if self.mode != "charging":
             self.mode = "charging"
             self._arrived = False
+            if bb["has_task"]:
+                await self.ctx.bus.publish("task/pause", {"reason": "battery"}, source=self.name)
             await self._set_goal(c["x"], c["y"], "charger")
             await self._set_state(SystemState.ACTIVE, "battery low, heading to charger")
             return Status.RUNNING
@@ -128,30 +209,16 @@ class Brain(Module):
                 await self._set_goal(c["x"], c["y"], "charger")     # missed the pad; retry
         return Status.RUNNING
 
-    async def _run_plan(self, bb: dict) -> Status:
-        step = self.plan.steps[self.plan_idx]
-        if self.mode != "plan":
-            self.mode = "plan"
+    async def _supervise(self, bb: dict) -> Status:
+        """A task is active: keep the system ACTIVE and make sure it is not paused for no reason."""
+        task = bb["task"] or {}
+        if self.mode != "task":
+            self.mode = "task"
             self.current_goal = None
             self._arrived = False
-        if self._arrived:
-            self._arrived = False
-            self.plan_idx += 1
-            self.current_goal = None
-            if self.plan_idx >= len(self.plan.steps):
-                await self.ctx.bus.publish("brain/plan_done", self.plan.to_dict(), source=self.name)
-                self.plan = None
-                self.mode = "idle"
-                return Status.SUCCESS
-            step = self.plan.steps[self.plan_idx]
-        if self.current_goal is None:
-            if step.skill == "goto":
-                await self._set_goal(step.args["x"], step.args["y"], step.args.get("name", "plan"))
-                await self._set_state(SystemState.ACTIVE, f"plan step {self.plan_idx}: {step.skill}")
-            else:
-                await self.ctx.bus.publish("skill/invoke", {"skill": step.skill, "args": step.args},
-                                           source=self.name)
-                self.plan_idx += 1
+        if task.get("status") == "paused" and not bb["need_charge"] and not bb["estop"]:
+            await self.ctx.bus.publish("task/resume", None, source=self.name)
+        await self._set_state(SystemState.ACTIVE, f"task {task.get('name')}")
         return Status.RUNNING
 
     async def _patrol(self, bb: dict) -> Status:
@@ -185,6 +252,10 @@ class Brain(Module):
     async def tick(self, dt: float) -> None:
         if not self.ctx.state.is_operational and self.ctx.state.state != SystemState.ESTOP:
             return
+        if self.pending and self.ctx.now - self.pending_since > self.ctx.config.brain.question_timeout:
+            await self.ctx.bus.publish("brain/question_closed", {"id": self.pending.id, "outcome": "timeout"},
+                                       source=self.name)
+            self.pending = None
         bb = self._blackboard()
         prev_mode = self.mode
         await self.tree.tick(bb)
@@ -194,6 +265,8 @@ class Brain(Module):
                                                    "patrol_idx": self.patrol_idx, "laps": self.laps,
                                                    "plan": self.plan.to_dict() if self.plan else None,
                                                    "plan_idx": self.plan_idx,
+                                                   "question": self.pending.question if self.pending else None,
+                                                   "question_id": self.pending.id if self.pending else None,
                                                    "active": self.tree.last_active},
                                    source=self.name)
 

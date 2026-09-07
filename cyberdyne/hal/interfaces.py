@@ -111,3 +111,60 @@ class IMU(Device):
 
     @abstractmethod
     async def read(self) -> IMUReading: ...
+
+
+@dataclass
+class Detection:
+    kind: str            # "person" | "object" | ...
+    label: str           # detector label ("person", "cup"...)
+    bearing: float       # radians, robot frame
+    distance: float      # metres
+    confidence: float
+    signature: str = ""  # identity embedding stand-in (face / object fingerprint)
+
+    def to_dict(self) -> dict:
+        return self.__dict__.copy()
+
+
+@dataclass
+class Frame:
+    ts: float
+    width: int
+    height: int
+    detections: list[Detection]
+    pixels: bytes | None = None   # real cameras carry pixels; the detector fills ``detections``
+
+
+class Camera(Device):
+    kind = DeviceKind.CAMERA
+    fov: float = 1.2          # radians
+    max_range: float = 6.0
+
+    @abstractmethod
+    async def capture(self) -> Frame: ...
+
+
+@dataclass
+class Utterance:
+    text: str
+    ts: float
+    signature: str = ""       # speaker embedding stand-in
+    loudness: float = 1.0
+
+    def to_dict(self) -> dict:
+        return self.__dict__.copy()
+
+
+class Microphone(Device):
+    kind = DeviceKind.MIC
+
+    @abstractmethod
+    async def listen(self) -> list[Utterance]:
+        """Drain utterances heard since the last call."""
+
+
+class Speaker(Device):
+    kind = DeviceKind.SPEAKER
+
+    @abstractmethod
+    async def say(self, text: str, voice: str = "neutral") -> None: ...

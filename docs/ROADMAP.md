@@ -15,32 +15,47 @@
 - [x] CLI: `run`, `check`, `say`, `scenario list`, `skills`
 - [x] 24 tests covering every layer plus end-to-end runs
 
-## Phase 2 — Mind
-- [ ] LLM planner + interpreter (Claude API) behind the existing `Planner` / `Interpreter` ABCs, with the rule versions as guardrails
-- [ ] Multi-agent cognition: perceiver / planner / critic / safety-officer roles
-- [ ] Mental simulation: run a candidate plan in a forked `World` before acting
-- [ ] Vector-backed episodic retrieval; semantic memory (knowledge graph)
-- [ ] Metacognition: confidence estimates, "ask the human" as a first-class action
-- [ ] Constitutional rule layer that checks LLM output against hard rules before dispatch
+## Phase 2 — Mind (done)
+- [x] `LLMBackend` seam; `AnthropicBackend` (official SDK, optional extra) and `ScriptedBackend` for tests
+- [x] `LLMPlanner` + `LLMInterpreter` behind the existing ABCs, rule versions as fallback and fast path
+- [x] Council: Perceiver / Planner / SafetyOfficer / Critic -> audited `Decision`
+- [x] Constitution: deterministic hard-rule review of every plan (bounds, keep-out, obstacles, permissions, unknown skills)
+- [x] Mental simulation on the believed map before acting; feeds the critic's confidence
+- [x] Metacognition: confidence threshold, `brain/question` <-> `human/answer`, timeouts, `explain` skill
+- [x] Semantic memory (knowledge graph), vector-backed episodic search, `forget` privacy primitive
+- [x] Dashboard: council panel, question/answer box, `/api/plan`, `/api/answer`; `council` scenario; 10 tests
+- [x] `cyberdyne eval-llm`: fixed interpreter/planner cases scored against Claude (live test opt-in via credentials); SDK error/refusal paths tested against the real SDK classes
+- Deferred: multi-turn dialogue memory for the LLM interpreter; learned confidence calibration
 
-## Phase 3 — Body
-- [ ] Camera device + object/face detection module; entity tracking with IDs
-- [ ] Microphone / speaker devices; wake word; TTS
-- [ ] Semantic SLAM (rooms, labels) on top of the occupancy grid
-- [ ] PyBullet/MuJoCo backend behind the same HAL
-- [ ] Raspberry Pi backend (GPIO motors, ultrasonic, IMU) + calibration pipeline
-- [ ] Social navigation costs (personal space) in the planner
+## Phase 3 — Body (done in simulation; serial backend ready for a board)
+- [x] Sim actors: people on routes and objects, seen by the range sensor and the camera, occluded by walls, yield to the robot
+- [x] `Camera` / `Microphone` / `Speaker` HAL interfaces + virtual drivers; `Detection`/`Frame`/`Utterance` types
+- [x] `VisionPerception` with `EntityTracker` (persistent ids, gating, smoothing, expiry); `perception/tracks`, `perception/people`
+- [x] `SocialModule` + `IdentityRegistry`: recognise known people, greet (rate-limited), security mode alerts on strangers
+- [x] `VoiceModule`: wake-word gating, speaker identity and trust on every utterance, robot speaks questions/results
+- [x] Trust-gated permissions: owner / guest / unknown ceilings on skill tiers
+- [x] Rooms in the world model, room labels on every entity, `find` skill ("amar keys kothay"), place-name goals ("kitchen e jao")
+- [x] Social navigation: personal-space cost layer in A*, slow-down near people
+- [x] Serial bridge backend (line protocol, `LoopbackTransport` fake firmware, pyserial optional), `mode = "serial"`, drive calibration; docs/HARDWARE.md
+- [x] Arduino firmware (`firmware/`) with host-tested protocol logic; Raspberry Pi backend (`mode = "rpi"`: OpenCV camera, Vosk microphone, espeak speaker), setup script, systemd unit, degraded boot
+- Follow-ups: face-embedding signatures for the real camera, speaker identification, IMU over serial, PyBullet backend
 
-## Phase 4 — Skills and learning
-- [ ] Skill composition and long-horizon tasks with interrupt/resume
-- [ ] Home automation skills (MQTT / Home Assistant)
-- [ ] Imitation + RL for local control in sim, shielded by the safety gate
-- [ ] User model: preferences, routines, mood
-- [ ] Sandboxed self-authored skills gated by `self.modify` permission
+## Phase 4 — Skills and learning (done)
+- [x] `TaskRunner`: goto / skill / wait / sub-task steps, retries, timeouts, pause/resume, cancel, queue; brain executes plans through it and pauses tasks for battery or e-stop
+- [x] `RoutineModule`: `every` (kernel clock), `at HH:MM` (wall clock), one-shot reminders; `remind` skill
+- [x] Home automation: `DeviceHub` with `VirtualHub`, `MQTTHub` (paho, optional), `HassHub` (REST); `device` skill resolves room from the world model; Bangla phrases ("kitchen er light jalao")
+- [x] Learning from demonstration: `DemoRecorder` + `teach` skill turn human-sent goals and device commands into a replayable task
+- [x] `UserModel`: per-person habits by time of day; proactive *suggestions* (never actions) when a habit is seen enough
+- [x] `ControllerTuner`: (1+1)-ES over local-controller parameters in simulation, scored on laps / distance / contacts / recoveries / collisions; `cyberdyne train`; the safety gate is outside the search space
+- [x] Self-authored **macro** skills (declarative steps + templates, no code), validated by the constitution, gated by `self.modify` (FORBIDDEN by default, CONFIRM when the owner enables it)
+- [x] `Store`: JSON persistence of facts, episodes, user model, taught tasks and macros across runs (`[learning] data_dir`)
+- Follow-ups: mood/affect estimation, RL policy for local control (the tuner is the shielded harness for it), LLM-drafted macros through the same validator
 
-## Phase 5 — Scale
-- [ ] Fleet transport (ZeroMQ / MQTT), shared world model sync (CRDT), task auction
-- [ ] Process isolation per module, Protobuf schemas
-- [ ] Deterministic replay and time-travel debugging from bus history
-- [ ] OTA update, rollback, fleet console
-- [ ] Formal verification of the safety gate (TLA+ model of the state machine + envelope)
+## Phase 5 — Scale (done)
+- [x] Fleet: `Transport` (in-memory hub, UDP broadcast), `FleetBridge` (presence, mirrored topics, LWW entity sync), `AuctionModule` (sealed-bid task allocation with mental-simulation costs), `FleetSim` lock-step harness, `cyberdyne fleet`
+- [x] Typed message schemas (`kernel/schema.py`) with a strict bus mode; every scenario passes strict
+- [x] Process isolation: `PureModule` + `IsolatedModule` host a module in a child process in lock-step; crashes and hangs become watchdog restarts
+- [x] Recording + time-travel: `BusRecorder` (JSON lines), `Recording.state_at / between / digest`, `cyberdyne replay`; determinism test (two runs, one digest)
+- [x] OTA: hashed `Bundle`s of routines / tasks / macros / permissions, validated (never `safety.*`), health-window auto-rollback, manual rollback, `ops/*` topics
+- [x] Formal verification: `safety/verify.py` exhaustively checks the real gate rules and transition table (I1..I8), `cyberdyne verify`; `docs/formal/SafetyGate.tla` for TLC
+- Follow-ups: ZeroMQ/MQTT transports, occupancy-grid CRDT merge, Protobuf wire format, fleet console page, TLC run in CI

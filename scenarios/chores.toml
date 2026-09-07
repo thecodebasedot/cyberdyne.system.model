@@ -1,0 +1,80 @@
+# Long-horizon work: a library task, a routine that starts it, smart-home
+# devices by room, a reminder, teaching a route by demonstration and
+# replaying it, and a macro skill defined at runtime (owner-enabled).
+name = "cyberdyne-chores"
+
+[world]
+width = 10.0
+height = 8.0
+robot_start = { x = 1.0, y = 1.0, theta = 0.0 }
+battery_start = 0.95
+obstacles = [ { x = 5.0, y = 3.0, w = 1.0, h = 2.0, name = "shelf" } ]
+rooms = [ { name = "hall", x = 0.0, y = 0.0, w = 4.0, h = 8.0 },
+          { name = "kitchen", x = 4.0, y = 0.0, w = 6.0, h = 3.0 },
+          { name = "living", x = 4.0, y = 3.0, w = 6.0, h = 5.0 } ]
+
+[safety.permissions]
+"self.modify" = "confirm"          # the owner allows macro skills, with confirmation
+
+[home]
+devices = [ { id = "kitchen_light", kind = "light", room = "kitchen" },
+            { id = "living_light",  kind = "light", room = "living" },
+            { id = "living_fan",    kind = "fan",   room = "living" } ]
+
+[[tasks]]
+name = "rounds"
+steps = [ { kind = "goto", args = { x = 8.0, y = 1.5, name = "kitchen" } },
+          { kind = "skill", args = { skill = "device", args = { kind = "light", room = "kitchen", on = true } } },
+          { kind = "wait", args = { seconds = 2 } },
+          { kind = "goto", args = { x = 8.0, y = 6.0, name = "living" } },
+          { kind = "skill", args = { skill = "device", args = { kind = "light", room = "kitchen", on = false } } } ]
+
+[[routines]]
+name = "hourly rounds"
+every = 45.0
+task = "rounds"
+
+[[events]]
+at = 1.0
+topic = "language/utterance"
+payload = { text = "start task rounds" }
+
+[[events]]
+at = 3.0
+topic = "language/utterance"
+payload = { text = "remind me in 20 seconds to check the oven" }
+
+[[events]]
+at = 30.0
+topic = "language/utterance"
+payload = { text = "teach corner_run" }
+
+[[events]]
+at = 31.0
+topic = "nav/goal"
+payload = { x = 2.0, y = 6.5, name = "demo" }
+
+[[events]]
+at = 38.0
+topic = "nav/goal"
+payload = { x = 1.0, y = 1.0, name = "demo" }
+
+[[events]]
+at = 44.0
+topic = "language/utterance"
+payload = { text = "done teaching" }
+
+[[events]]
+at = 46.0
+topic = "language/utterance"
+payload = { text = "start task corner_run" }
+
+[[events]]
+at = 70.0
+topic = "skill/invoke"
+payload = { skill = "define_skill", confirmed = true, args = { name = "lights_out", description = "all lights off", steps = [ { kind = "skill", args = { skill = "device", args = { kind = "light", on = false } } } ] } }
+
+[[events]]
+at = 72.0
+topic = "skill/invoke"
+payload = { skill = "lights_out" }

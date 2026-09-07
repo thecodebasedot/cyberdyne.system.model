@@ -24,7 +24,10 @@ class SkillRegistry:
         return found
 
     def load_builtin(self) -> list[Skill]:
-        return self.load_module("cyberdyne.skills.builtin.core")
+        found = self.load_module("cyberdyne.skills.builtin.core")
+        found += self.load_module("cyberdyne.skills.builtin.home")
+        found += self.load_module("cyberdyne.skills.authoring")
+        return found
 
     def get(self, name: str) -> Skill:
         try:

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .clock import Clock
+from .schema import SchemaError, validate
 
 log = logging.getLogger("cyberdyne.bus")
 
@@ -54,13 +55,16 @@ class BusStats:
 class MessageBus:
     FAULT_TOPIC = "kernel/fault"
 
-    def __init__(self, clock: Clock, history: int = 2000) -> None:
+    def __init__(self, clock: Clock, history: int = 2000, strict: bool = False) -> None:
         self._clock = clock
         self._subs: list[_Subscription] = []
         self._seq = 0
         self._latest: dict[str, Message] = {}
         self._history: deque[Message] = deque(maxlen=history)
         self.stats = BusStats()
+        self.strict = strict                       # validate payloads against kernel.schema
+        self.schema_errors = 0
+        self.taps: list[Callable[[Message], None]] = []   # recorders see every message, cannot fail publish
 
     # -- subscription -----------------------------------------------------
     def subscribe(self, pattern: str, handler: Handler, name: str = "") -> _Subscription:
@@ -73,12 +77,23 @@ class MessageBus:
 
     # -- publishing -------------------------------------------------------
     async def publish(self, topic: str, payload: Any = None, source: str = "kernel") -> Message:
+        if self.strict:
+            try:
+                validate(topic, payload)
+            except SchemaError as exc:
+                self.schema_errors += 1
+                raise SchemaError(f"{source} -> {topic}: {exc}") from None
         self._seq += 1
         msg = Message(topic, payload, source, self._clock.now(), self._seq)
         self._latest[topic] = msg
         self._history.append(msg)
         self.stats.published += 1
         self.stats.per_topic[topic] += 1
+        for tap in self.taps:
+            try:
+                tap(msg)
+            except Exception:  # noqa: BLE001
+                log.exception("bus tap failed")
 
         for sub in list(self._subs):
             if not fnmatch.fnmatchcase(topic, sub.pattern):

@@ -1,12 +1,18 @@
 """WorldModel module: fuses odometry + scans into the grid and entity store.
 
-    world/summary  {explored, entities, updates}
+    in : sensor/odometry, perception/scan, world/observe {id, kind, x, y, attrs}
+    out: world/summary  {explored, entities, updates, room}
+         world/room     {name}            when the robot changes room
+
+Rooms are named rectangles from config; every entity carries the room it
+was last seen in, which is what makes "where are my keys?" answerable.
 """
 from __future__ import annotations
 
 from ..hal.interfaces import DeviceKind, RangeSensor
 from ..kernel.context import Context
 from ..kernel.module import Module
+from ..sim.world import Obstacle
 from .entities import EntityStore
 from .grid import OccupancyGrid
 
@@ -22,9 +28,46 @@ class WorldModel(Module):
         self.grid = OccupancyGrid(w.width, w.height)
         self.entities = EntityStore()
         self.max_range = ctx.devices.get(DeviceKind.RANGE, RangeSensor).max_range
-        self.entities.observe("charger", "place", w.charger["x"], w.charger["y"], ctx.now)
+        self.rooms = [Obstacle(r["x"], r["y"], r["w"], r["h"], r["name"]) for r in w.rooms]
+        self.current_room: str | None = None
+        self.entities.observe("charger", "place", w.charger["x"], w.charger["y"], ctx.now,
+                              room=self.room_of(w.charger["x"], w.charger["y"]))
+        for r in self.rooms:
+            self.entities.observe(r.name, "room", r.x + r.w / 2, r.y + r.h / 2, ctx.now, room=r.name)
         for i, p in enumerate(ctx.config.brain.patrol):
-            self.entities.observe(f"waypoint_{i}", "waypoint", p["x"], p["y"], ctx.now, index=i)
+            self.entities.observe(f"waypoint_{i}", "waypoint", p["x"], p["y"], ctx.now, index=i,
+                                  room=self.room_of(p["x"], p["y"]))
+        self._sub = ctx.bus.subscribe("world/observe", self._on_observe, name="world_model.observe")
+
+    async def teardown(self) -> None:
+        self.ctx.bus.unsubscribe(self._sub)
+
+    def room_of(self, x: float, y: float) -> str | None:
+        for r in self.rooms:
+            if r.contains(x, y):
+                return r.name
+        return None
+
+    def _on_observe(self, msg) -> None:
+        p = msg.payload
+        self.entities.observe(p["id"], p["kind"], p["x"], p["y"], self.ctx.now,
+                              room=self.room_of(p["x"], p["y"]), **(p.get("attrs") or {}))
+
+    def places(self) -> dict[str, tuple[float, float]]:
+        """Name -> coordinates for everything the planner may target by name."""
+        out: dict[str, tuple[float, float]] = {}
+        for e in self.entities.all():
+            key = e["id"].split(":", 1)[-1].lower()
+            out[key] = (e["x"], e["y"])
+        return out
+
+    def find(self, name: str) -> dict | None:
+        n = name.lower().strip()
+        for e in self.entities.all():
+            eid = e["id"].lower()
+            if eid == n or eid.split(":", 1)[-1] == n or eid.split("#", 1)[0] == n or n in e["attrs"].values():
+                return e
+        return None
 
     async def tick(self, dt: float) -> None:
         bus = self.ctx.bus
@@ -32,10 +75,16 @@ class WorldModel(Module):
         scan = bus.latest_payload("perception/scan")
         if pose and scan:
             self.grid.integrate_scan(pose, scan, self.max_range)
-            self.entities.observe("self", "robot", pose["x"], pose["y"], self.ctx.now)
+            room = self.room_of(pose["x"], pose["y"])
+            self.entities.observe("self", "robot", pose["x"], pose["y"], self.ctx.now, room=room)
+            if room != self.current_room:
+                self.current_room = room
+                await bus.publish("world/room", {"name": room}, source=self.name)
         await bus.publish("world/summary", {"explored": round(self.grid.explored_fraction(), 3),
                                             "entities": len(self.entities.all()),
-                                            "grid_updates": self.grid.updates}, source=self.name)
+                                            "grid_updates": self.grid.updates,
+                                            "room": self.current_room}, source=self.name)
 
     def snapshot(self) -> dict:
-        return {"grid": self.grid.to_dict(), "entities": self.entities.all()}
+        return {"grid": self.grid.to_dict(), "entities": self.entities.all(),
+                "rooms": [r.to_dict() for r in self.rooms], "room": self.current_room}

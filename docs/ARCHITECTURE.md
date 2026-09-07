@@ -75,6 +75,123 @@ FORBIDDEN in the permission policy).
   entry. Boot, shutdown, e-stops, violations, module faults/restarts, brain
   mode changes and logged skill invocations all land here.
 
+## Body (Phase 3)
+
+* **Actors** in the sim world: people with looping routes and static
+  objects. The range sensor sees them (dynamic obstacles), the camera sees
+  them inside its field of view unless a static obstacle occludes them, and
+  they yield rather than walk through the robot.
+* **Camera / Microphone / Speaker** HAL interfaces. The virtual camera
+  returns `Detection`s directly (bearing, distance, confidence, identity
+  signature only when close enough); a real camera returns pixels and a
+  detector fills the same list.
+* **VisionPerception** runs an `EntityTracker`: nearest-neighbour
+  association in world coordinates, persistent ids, exponential smoothing,
+  expiry. Publishes `perception/tracks` and `perception/people`.
+* **SocialModule** maps track signatures to people through the
+  `IdentityRegistry` (name, trust). Known people get greeted once per
+  cooldown; in armed security mode a signature nobody matches raises
+  `security/alert` (a missing signature just means "too far to tell").
+  Every track is pushed to the world model as an entity with its room.
+* **VoiceModule** drains the microphone, strips wake words, attaches speaker
+  name and trust, and publishes `language/utterance`. With
+  `require_wake_word` on, unaddressed speech is only logged as
+  `speech/overheard`. It also speaks: `speech/say`, the brain's questions,
+  and skill results that carry a `speech` field.
+* **Trust ceilings**: `PermissionPolicy.check(action, confirmed, trust)`.
+  Owners may reach CONFIRM, guests LOG, unknown speakers FREE (all
+  configurable). The `SkillRunner` carries the utterance's trust through.
+* **Rooms**: named rectangles in `[world] rooms`. The world model labels
+  the robot's current room (`world/room`) and every entity's last-seen
+  room. `find <name>` answers "where is X" with room and age; `goto <place>`
+  resolves names through `WorldModel.places()` (rooms, charger, waypoints,
+  recognised people, tracked objects).
+* **Social navigation**: `GridPlanner.plan(..., soft=[(x, y, radius, weight)])`
+  adds personal-space cost around people; the local controller scales speed
+  down inside 1.5x personal space.
+* **Serial backend** (`hal/serial`): a line protocol to a microcontroller,
+  `SerialDrive` / `SerialRangeSensor` / `SerialBattery`, a `LoopbackTransport`
+  fake firmware for tests, and `calibrate_drive` to derive odometry scale
+  factors. `mode = "serial"` in `[kernel]` swaps the whole HAL. See
+  `docs/HARDWARE.md`.
+
+## Skills and learning (Phase 4)
+
+* **Tasks** (`tasks/`): a `Task` is a list of `TaskStep`s (`goto`, `skill`,
+  `wait`, `task` = spliced sub-task). `TaskRunner` executes one task at a
+  time with per-step timeouts and retries, and supports pause (cancels the
+  navigation goal, keeps the index), resume, cancel, queueing and
+  supersede. Approved council decisions become tasks; the brain's
+  behaviour tree only *supervises* (`has task` branch) and pre-empts:
+  low battery or e-stop pauses the task, a full battery resumes it.
+* **Routines** (`tasks/routines.py`): `every` seconds on the kernel clock,
+  `at HH:MM` daily on the wall clock, one-shot reminders. A routine
+  starts a library task, sends a goal to the council, or just speaks.
+* **Home** (`home/`): `DeviceHub` (virtual / MQTT / Home Assistant) with
+  room-aware lookup. The `device` skill defaults to the room the robot is
+  in, so "light jalao" works without naming a room.
+* **Learning** (`learning/`):
+  * `DemoRecorder` records human-sent goals and device commands while
+    `teach <name>` is active and turns them into a library task
+    (learning from demonstration).
+  * `UserModel` counts (person, time bucket, request) and, once a habit
+    crosses `suggest_after`, the robot asks "shall I?" through
+    `brain/suggestion` + speech. Suggesting is the ceiling: habits never
+    become actions on their own.
+  * `ControllerTuner` runs headless simulated episodes and hill-climbs the
+    local controller's parameters within bounds. The safety gate is not a
+    parameter and still clamps every command the tuned controller emits:
+    learning is *shielded* by construction.
+* **Self-authored skills** (`skills/authoring.py`): the only form of
+  self-modification is a **macro**: named, parameterised, declarative
+  steps over existing skills. No generated code runs. Every macro passes
+  `validate_macro` (identifier rules, known skills, constitution review)
+  and creating one is the `self.modify` action: FORBIDDEN unless the owner
+  sets it to CONFIRM in `[safety.permissions]`.
+* **Persistence** (`memory/persist.py`): with `[learning] data_dir` set,
+  facts, episodes, the user model, taught tasks and macros are written as
+  JSON at shutdown and loaded at boot.
+
+## Scale (Phase 5)
+
+* **Schemas** (`kernel/schema.py`): every important topic declares a payload
+  shape. `MessageBus(strict=True)` validates on publish; a drifting module
+  fails at its own `publish` instead of corrupting a neighbour. All
+  scenarios run strict in the test suite.
+* **Process isolation** (`kernel/isolation.py`): a `PureModule` is
+  `compute(dt, inputs) -> outputs`. `IsolatedModule` runs it in a child
+  process and drives it in lock-step (send inputs, wait with a timeout,
+  publish outputs). A crash or hang is a normal module fault; the watchdog
+  restart respawns the process. Determinism is kept because the parent
+  waits.
+* **Recording and time-travel** (`observability/recording.py`):
+  `kernel.record = path` taps the bus into JSON lines. `Recording`
+  answers `state_at(t)` (what every module could see), `between(t0, t1)`
+  and `digest()`. Two runs of the same scenario produce the same digest,
+  which is the kernel's determinism claim, tested.
+* **Fleet** (`fleet/`): `FleetBridge` sends heartbeats (state, pose,
+  battery, task), mirrors a few topics (`security/alert`, `task/done`,
+  ...) as `fleet/<robot>/<topic>`, and syncs entity sightings as a
+  last-writer-wins map keyed on observation time, so two robots that see
+  the same person converge without coordination. `AuctionModule` runs
+  sealed-bid allocation: cost = predicted travel time (mental simulation on
+  the believed map) + battery + busy penalties; robots in e-stop or with a
+  low battery do not bid; ties break on name. `FleetSim` runs N runtimes
+  on one clock, frame by frame. Transports: in-memory hub, UDP broadcast.
+* **OTA** (`ops/`): a `Bundle` (routines, tasks, macros, permission
+  overrides; never `safety.*`, `kernel`, `hardware`) is validated
+  (constitution for macros), activated, then watched for a health window:
+  any module fault, task failure or e-stop rolls it back to the previous
+  bundle; otherwise it commits. Everything is audited.
+* **Verification** (`safety/verify.py`): an exhaustive check over the real
+  `SafetyGate` rule order (`gate_decision`, shared with the module) and the
+  real transition table: e-stop zeroes both velocities, critical battery /
+  stale perception / short clearance forbid forward motion, the envelope is
+  never exceeded, ESTOP exits only to DIAGNOSTIC or SHUTDOWN, every
+  operational state reaches ESTOP in one step, BOOT cannot skip
+  DIAGNOSTIC. `docs/formal/SafetyGate.tla` states the same invariants for
+  TLC.
+
 ## Perception → World model → Memory
 
 * `SensorHub` publishes `sensor/odometry|battery|imu`.
@@ -85,6 +202,13 @@ FORBIDDEN in the permission policy).
 * `MemoryModule` turns notable bus events into `EpisodicMemory` episodes with
   importance + recency retrieval and capacity-driven consolidation
   (forgetting); `WorkingMemory` is a TTL scratchpad.
+* `EpisodicMemory.search(text)` is vector-backed through `TextIndex`, whose
+  `Embedder` is pluggable (`HashEmbedder` is dependency-free hashed
+  bag-of-words + trigrams; a sentence-transformer drops in unchanged).
+* `KnowledgeGraph` is semantic memory: (subject, predicate, object) facts,
+  newest wins, neighbour queries. `remember` writes facts, `recall <query>`
+  searches both stores, `forget <x>` erases a subject from every store and
+  audits it (the privacy primitive).
 
 ## Cognition (`cyberdyne/cognition`)
 
@@ -99,11 +223,64 @@ Selector
 └─ idle                         → IDLE or CHARGING if on the pad
 ```
 
-Free-form goals arrive on `brain/goal` and go through a `Planner`.
-`RulePlanner` handles `goto x y`, `patrol`, `charge`, `stop`; an LLM planner
-implements the same `plan(goal, context) -> Plan` and is a constructor
-argument. The brain owns every navigation goal so safety pre-emption
+Free-form goals arrive on `brain/goal` and go through the **council**
+(below). The brain owns every navigation goal so safety pre-emption
 (battery, e-stop) always wins over user requests.
+
+### The council (Phase 2)
+
+```
+brain/goal ──> Perceiver ──> brief ──┐
+                                     ├─> Planner (rule | LLM) ──> Plan
+                                     │        │
+                                     │        ├─> SafetyOfficer: Constitution.review  ─> violations
+                                     │        └─> Critic: MentalSimulator.rollout      ─> confidence, critique
+                                     └─────────────────────────────────────────────────┘
+                                                             │
+                                          Decision{approved | question + options}
+                                                             │
+                              approved ──> brain adopts plan ──> nav/goal / skill/invoke
+                              held     ──> brain/question ──> human/answer ──> proceed | cancel | new goal
+```
+
+* **Perceiver** compresses the bus into a situation brief (pose, battery,
+  e-stop, world bounds, keep-out zones, known entities, explored fraction,
+  available skills with their argument names). The same brief is what the
+  LLM planner sees, so what the model knows is exactly what is logged.
+* **Planner** is `RulePlanner` (goto / patrol / charge / stop) or
+  `LLMPlanner`, which asks the model for a JSON plan and falls back to the
+  rules on any transport, refusal or parse failure. Fallbacks are marked in
+  the plan rationale and lower the critic's confidence.
+* **SafetyOfficer** applies the `Constitution`: unknown skills, forbidden or
+  confirm-tier actions, goals out of bounds, inside obstacles or keep-out
+  zones, plans that are too long. Hard violations (`keep_out`,
+  `out_of_bounds`, `inside_obstacle`, `forbidden_action`, `unknown_skill`)
+  can never be overridden by a human answer; `needs_confirmation` can.
+* **Critic** runs the `MentalSimulator`: an imagined `World` built only from
+  the occupancy grid (belief, not ground truth), each goto rolled out with a
+  kinematic follower on the A* path. It reports reachability, time,
+  distance and predicted battery; confidence falls for infeasible steps,
+  battery below reserve, an unexplored map, long plans or a rule fallback.
+* **Decision** is audited and published on `brain/decision`. Below the
+  confidence threshold, or with any violation, the brain publishes
+  `brain/question` (with options) instead of acting. `human/answer` closes
+  it: `proceed` re-deliberates with confirmation, `cancel` drops it,
+  anything else is a new goal. Unanswered questions time out.
+* **Explain**: the `explain` skill returns the last decision (goal, plan,
+  rationale, violations, critique, prediction) so "keno korle?" has an
+  answer grounded in what actually happened.
+
+### LLM seam (`cognition/llm.py`)
+
+`LLMBackend.complete(system, prompt, effort)` is the only model call in the
+codebase. `AnthropicBackend` uses the official async SDK (`claude-opus-5`
+by default, adaptive thinking, `output_config.effort`, cached system prompt,
+typed error handling, `refusal` stop reason surfaced as `LLMRefused`).
+`ScriptedBackend` returns canned text for tests. `build_backend(kind)` maps
+the `[brain] llm` config value to a backend; `none` runs the robot fully
+rule-based. The `LanguageModule` uses `LLMInterpreter`, which tries the
+rule interpreter first (free, deterministic) and only asks the model for
+utterances the rules do not understand.
 
 ## Motion (`cyberdyne/motion`)
 
@@ -149,9 +326,28 @@ module health, events, audit chain. Commands go back through the bus
 | `sensor/battery` | SensorHub | `{level, charging, voltage}` |
 | `perception/scan` | RangePerception | `[{angle, distance}]` |
 | `perception/front_clearance` | RangePerception | metres |
+| `perception/detections`, `perception/tracks`, `perception/people` | VisionPerception | |
+| `social/recognised`, `security/alert`, `speech/say` | SocialModule | |
+| `speech/said`, `speech/overheard` | VoiceModule | |
+| `world/observe` | SocialModule -> WorldModel | `{id, kind, x, y, attrs}` |
+| `world/room` | WorldModel | `{name}` |
+| `security/arm` | `arm` skill | `{armed}` |
+| `sim/hear` | scenario -> virtual microphone | `{text, signature}` |
 | `world/summary` | WorldModel | `{explored, entities, grid_updates}` |
-| `brain/goal` | skills / users | `{goal: "goto 3 4"}` |
-| `brain/plan`, `brain/plan_done`, `brain/state`, `brain/lap` | Brain | |
+| `brain/goal` | skills / users | `{goal: "...", confirmed?}` |
+| `brain/decision` | Brain (council) | `Decision.to_dict()` |
+| `brain/question`, `brain/question_closed` | Brain | `{id, question, options, goal}` / `{id, outcome}` |
+| `human/answer` | dashboard / `answer` skill | `{answer, id?}` |
+| `brain/plan`, `brain/plan_done`, `brain/state`, `brain/lap`, `brain/suggestion` | Brain / UserModel | |
+| `task/start`, `task/pause`, `task/resume`, `task/cancel` | brain, skills, routines | `{name, steps?, origin?, queue?}` |
+| `task/started`, `task/step`, `task/retry`, `task/paused`, `task/resumed`, `task/done`, `task/failed`, `task/cancelled`, `task/status` | TaskRunner | `Task.to_dict()` |
+| `routine/fired` | RoutineModule | `Routine.to_dict()` |
+| `home/device` | `device` skill | `SmartDevice.to_dict()` |
+| `recorder/status` | DemoRecorder | `{recording, steps}` |
+| `skill/defined` | `define_skill` | macro spec |
+| `fleet/peers`, `fleet/peer_lost`, `fleet/<robot>/<topic>` | FleetBridge | |
+| `fleet/auction`, `fleet/bid_placed`, `fleet/awarded`, `fleet/auction_failed` | AuctionModule | |
+| `ops/update`, `ops/rollback` -> `ops/activated`, `ops/committed`, `ops/rolled_back`, `ops/rejected` | OpsModule | |
 | `nav/goal`, `nav/cancel` | Brain | `{x, y, name}` |
 | `nav/path`, `nav/status`, `nav/arrived`, `nav/recovery` | MotionController | |
 | `motion/cmd` | MotionController | `{linear, angular}` requested |
@@ -170,11 +366,21 @@ module health, events, audit chain. Commands go back through the bus
 | Custom RTOS, formal verification (A) | `kernel/` | `Clock`/`Scheduler` contracts, deterministic frames |
 | Custom silicon, FPGA perception (B) | `hal/` drivers | `Device` interface, registry, self-test |
 | Global-workspace cognition, homeostasis, dreaming (C) | `cognition/`, `memory/` | blackboard + BT, episodic consolidation |
-| Custom ML stack, VLA, neural world model (D) | `perception/`, `world_model/`, `cognition/planner.py` | `Planner`, `Interpreter` ABCs |
-| Self-modification (E) | `learning/`, `skills/` | `Learner.propose`, `self.modify` FORBIDDEN gate |
+| Custom ML stack, VLA, neural world model (D) | `perception/`, `world_model/`, `cognition/planner.py` | `Planner`, `Interpreter`, `LLMBackend`, `Embedder` ABCs |
+| Global workspace / metacognition (C) | `cognition/council.py` | brief -> plan -> critique -> question loop |
+| Constitutional rules over LLM output (F) | `cognition/constitution.py` | deterministic review, hard vs overridable |
+| Mental simulation (C) | `cognition/simulate.py` | belief-only imagined world |
+| Self-modification (E) | `skills/authoring.py` | declarative macros only, constitution-validated, `self.modify` gate |
+| Learning (D, C) | `learning/` | demonstration recorder, user model, shielded tuner |
+| Long-horizon tasks, routines (9) | `tasks/`, `home/` | TaskRunner pause/resume, routines, device hub |
 | Runtime verification, shielded RL (F) | `safety/` | `SafetyGate` as sole actuator writer |
-| Robot society / fleet economy (G) | `fleet/` | `FleetMessage`, `Transport` |
-| Deep human modelling (H) | `world_model/entities.py`, `memory/` | `EntityStore` |
+| Robot society / fleet economy (G) | `fleet/` | bridge, LWW entity sync, sealed-bid auction, FleetSim |
+| Runtime verification (F) | `safety/verify.py`, `docs/formal/` | exhaustive gate + state-machine check, TLA+ spec |
+| Ops, OTA, rollback (N) | `ops/` | hashed bundles, health-window rollback |
+| Process isolation, typed schemas (0) | `kernel/isolation.py`, `kernel/schema.py` | lock-step child processes, strict bus |
+| Time-travel debugging (13) | `observability/recording.py` | JSONL recording, state_at, digest |
+| Deep human modelling (H) | `social/`, `world_model/entities.py`, `memory/` | `IdentityRegistry`, trust, `EntityStore` with rooms |
+| Custom silicon / real drivers (B) | `hal/serial`, `hal/calibration.py` | line protocol, loopback firmware, calibration |
 | Security hardening, immune system (I, J) | `safety/audit.py`, `kernel/watchdog.py` | hash chain, restart budget |
 | Simulation at scale, digital twin (K, L) | `sim/`, `scenarios/` | scenario DSL, fault injection |
 | Compliance and ethics (M) | `safety/permissions.py`, audit | tiers + tamper-evident log |

@@ -4,6 +4,9 @@ from __future__ import annotations
 from ..kernel.context import Context
 from ..kernel.module import Module
 
+_NOISY = ("sensor/", "perception/", "motion/", "nav/status", "nav/path", "brain/state", "world/summary",
+          "memory/", "telemetry/", "task/status")
+
 
 class Telemetry(Module):
     name = "telemetry"
@@ -38,6 +41,24 @@ class Telemetry(Module):
             "brain": bus.latest_payload("brain/state"),
             "nav": bus.latest_payload("nav/status"),
             "path": bus.latest_payload("nav/path"),
+            "decision": bus.latest_payload("brain/decision"),
+            "question": (bus.latest_payload("brain/question")
+                         if (bus.latest_payload("brain/state") or {}).get("question") else None),
+            "llm": ctx.extras["llm"].describe() if ctx.extras.get("llm") else None,
+            "facts": mem.semantic.all()[-10:] if mem else [],
+            "tracks": bus.latest_payload("perception/tracks", []),
+            "task": bus.latest_payload("task/status"),
+            "task_history": [t.to_dict() for t in ctx.extras["tasks"].history[-5:]] if "tasks" in ctx.extras else [],
+            "routines": ctx.extras["routines"].describe() if "routines" in ctx.extras else [],
+            "devices": ctx.extras["home"].describe() if ctx.extras.get("home") else [],
+            "recorder": bus.latest_payload("recorder/status"),
+            "suggestion": bus.latest_payload("brain/suggestion"),
+            "peers": bus.latest_payload("fleet/peers", []),
+            "auction": ctx.extras["auction"].describe() if "auction" in ctx.extras else None,
+            "ops": ctx.extras["ops"].describe() if "ops" in ctx.extras else None,
+            "room": bus.latest_payload("world/room"),
+            "speech": [m.payload for m in bus.history("speech/said", 6)],
+            "alerts": [m.payload for m in bus.history("security/alert", 5)],
             "scan": bus.latest_payload("perception/scan"),
             "front_clearance": bus.latest_payload("perception/front_clearance"),
             "cmd": bus.latest_payload("motion/cmd_applied"),
@@ -49,9 +70,7 @@ class Telemetry(Module):
                     "errors": bus.stats.handler_errors, "topics": bus.topics()},
             "scheduler": self._scheduler.describe() if self._scheduler else None,
             "skills": ctx.extras["skills"].describe() if "skills" in ctx.extras else [],
-            "recent": [m.to_dict() for m in bus.history("*", 25)
-                       if not m.topic.startswith(("sensor/", "perception/", "motion/", "nav/status", "nav/path",
-                                                  "brain/state", "world/", "memory/"))],
+            "recent": [m.to_dict() for m in bus.history("*", 25) if not m.topic.startswith(_NOISY)],
         }
         return snap
 
