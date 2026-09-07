@@ -7,8 +7,17 @@ kernel, a hardware abstraction layer, an immutable safety core with a
 hash-chained audit log, perception, an occupancy-grid world model, memory,
 a behaviour-tree brain, A* navigation, a permissioned skill system, a
 command interpreter (English + romanised Bangla) and a live web dashboard.
-Every later layer of the design (LLM cognition, real hardware, learning,
-fleets, formal verification) plugs into contracts that already exist.
+
+Phase 2 gives it a mind: free-form goals go through a **council** (perceiver,
+planner, safety officer, critic) that reviews every plan against a
+deterministic constitution, rehearses it in a mental simulation built from
+the robot's own map, and asks the human when it is blocked or unsure. The
+planner and interpreter can be Claude (official SDK, optional) or rules;
+rules remain the fallback and the guardrail either way. Memory grows a
+knowledge graph, vector search and a `forget` primitive.
+
+Every later layer of the design (real hardware, learning, fleets, formal
+verification) plugs into contracts that already exist.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -24,7 +33,7 @@ Python 3.11+, no runtime dependencies.
 pip install -e ".[dev]"
 
 cyberdyne check                       # boot, self-test, 1 s of sim, JSON report
-cyberdyne scenario list               # patrol, estop_drill, voice, sensor_fault
+cyberdyne scenario list               # patrol, estop_drill, voice, sensor_fault, council
 cyberdyne run -s patrol -t 300        # 300 sim-seconds as fast as possible
 cyberdyne run -s patrol -d            # real-time with the dashboard on http://127.0.0.1:8080
 cyberdyne say "go to 8 2"             # one-shot command, 20 s run, report
@@ -32,6 +41,34 @@ cyberdyne skills                      # built-in skills and their permission tie
 ```
 
 Without installing: `PYTHONPATH=. python -m cyberdyne ...`
+
+## Using Claude as the planner and interpreter
+
+```bash
+pip install -e ".[llm]"          # official anthropic SDK
+export ANTHROPIC_API_KEY=...     # or `ant auth login`
+```
+
+In a scenario (or `RobotConfig.brain`):
+
+```toml
+[brain]
+llm = "anthropic"                # "none" = rule-based (default)
+model = "claude-opus-5"
+effort = "high"                  # planner; the interpreter always runs at "low"
+confidence_threshold = 0.6
+```
+
+The model only ever *proposes*. Every plan still passes the constitution
+(bounds, keep-out zones, obstacles, permissions, known skills), a mental
+simulation, and the safety gate at the motors. A transport error, refusal or
+unparsable reply falls back to the rule planner and lowers confidence, which
+usually means the robot asks you before acting.
+
+```bash
+cyberdyne say "ranna ghor-er janala-r kache jao"     # rules can't parse it -> Claude maps it to a goal
+cyberdyne say "keno korle"                           # explain the last decision
+```
 
 ## The dashboard
 
@@ -56,7 +93,11 @@ E-STOP / RESET.
 * Refuses to drive forward when perception goes quiet; the watchdog
   restarts the failed module and the robot carries on.
 * Takes commands in English or romanised Bangla, runs them as permissioned
-  skills, and remembers what happened (episodic + working memory).
+  skills, and remembers what happened (episodic + working + semantic memory).
+* Deliberates on free-form goals: refuses goals into keep-out zones or
+  obstacles outright, asks before confirm-tier actions or when its own
+  prediction is shaky, accepts `proceed` / `cancel` / a new goal, and can
+  explain why it decided what it decided.
 
 ## Layout
 
@@ -68,11 +109,11 @@ cyberdyne/
   safety/         envelope, e-stop, permissions, audit log, SafetyGate
   perception/     sensor hub, range perception
   world_model/    occupancy grid, entity store
-  memory/         working + episodic memory
-  cognition/      behaviour tree, planner, brain
+  memory/         working + episodic (vector search) + semantic (knowledge graph)
+  cognition/      behaviour tree, planner, brain, council, constitution, mental simulation, LLM seam
   motion/         A* grid planner, local controller
   skills/         manifests, registry, runner, builtin/
-  language/       rule interpreter, language module
+  language/       rule interpreter, LLM interpreter, language module
   observability/  telemetry, dashboard (+ dashboard.html)
   learning/       reserved (Phase 4)
   fleet/          reserved (Phase 5)
@@ -117,7 +158,7 @@ payload = { text = "jao 2 7" }
 ## Development
 
 ```bash
-pytest          # 24 tests, ~4 s
+pytest          # 34 tests, ~5 s
 ruff check .
 ```
 

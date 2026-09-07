@@ -1,0 +1,42 @@
+# Free-form goals go through the council. The first goal targets the stairs
+# keep-out zone: the safety officer blocks it and the robot asks for another
+# goal. The human answers with a safe one. The second goal is a long patrol
+# the critic is happy with. The third is nonsense the planner cannot handle.
+name = "cyberdyne-council"
+
+[world]
+robot_start = { x = 1.0, y = 1.0, theta = 0.0 }
+battery_start = 0.9
+obstacles = [ { x = 4.0, y = 3.0, w = 2.0, h = 1.0, name = "sofa" } ]
+
+[brain]
+patrol = [ { x = 8.0, y = 1.5 }, { x = 8.0, y = 8.0 }, { x = 2.0, y = 8.0 } ]
+confidence_threshold = 0.6
+
+[safety]
+keep_out = [ { x = 0.0, y = 8.5, w = 1.5, h = 1.5, name = "stairs" } ]
+
+[[events]]
+at = 1.0
+topic = "language/utterance"
+payload = { text = "go to 0.5 9.5" }
+
+[[events]]
+at = 4.0
+topic = "language/utterance"
+payload = { text = "answer goto 8 8 corner" }
+
+[[events]]
+at = 30.0
+topic = "language/utterance"
+payload = { text = "keno korle" }
+
+[[events]]
+at = 31.0
+topic = "language/utterance"
+payload = { text = "do juggle three oranges" }
+
+[[events]]
+at = 33.0
+topic = "language/utterance"
+payload = { text = "cancel" }

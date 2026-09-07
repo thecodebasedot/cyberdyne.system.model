@@ -50,6 +50,11 @@ class BrainConfig:
     battery_low: float = 0.25
     battery_full: float = 0.95
     goal_tolerance: float = 0.2
+    llm: str = "none"                 # "none" | "anthropic" | "scripted"
+    model: str = "claude-opus-5"
+    effort: str = "high"              # planner effort; the interpreter always runs at "low"
+    confidence_threshold: float = 0.6 # below this the brain asks the human before acting
+    question_timeout: float = 120.0   # seconds an unanswered question stays open
 
 
 @dataclass

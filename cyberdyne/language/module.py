@@ -39,7 +39,7 @@ class LanguageModule(Module):
         while self._pending:
             utt = self._pending.pop(0)
             text = str(utt.get("text", ""))
-            intent = self.interpreter.parse(text)
+            intent = await self.interpreter.parse_async(text)
             if intent is None:
                 self.unknown += 1
                 await bus.publish("language/unknown", {"text": text}, source=self.name)

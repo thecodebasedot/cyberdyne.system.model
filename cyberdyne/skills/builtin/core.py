@@ -86,7 +86,9 @@ class RememberSkill(Skill):
         if mem is None:
             return SkillResult(False, error="memory module not loaded")
         mem.working.set(args["key"], args.get("value"), args.get("ttl"))
-        return SkillResult(True, {"stored": args["key"]})
+        subject = args.get("subject", "self")
+        mem.semantic.add(subject, args["key"], str(args.get("value")), "user", ctx.now)
+        return SkillResult(True, {"stored": args["key"], "fact": f"{subject} {args['key']} {args.get('value')}"})
 
 
 class RecallSkill(Skill):
@@ -98,5 +100,70 @@ class RecallSkill(Skill):
         mem = ctx.extras.get("memory")
         if mem is None:
             return SkillResult(False, error="memory module not loaded")
-        eps = mem.episodic.query(ctx.now, args.get("kind"), int(args.get("limit", 5)))
-        return SkillResult(True, [{"ts": e.ts, "summary": e.summary} for e in eps])
+        limit = int(args.get("limit", 5))
+        if args.get("query"):
+            eps = mem.episodic.search(str(args["query"]), limit)
+        else:
+            eps = mem.episodic.query(ctx.now, args.get("kind"), limit)
+        facts = mem.semantic.neighbours(str(args["query"])) if args.get("query") else []
+        return SkillResult(True, {"episodes": [{"ts": e.ts, "summary": e.summary} for e in eps],
+                                  "facts": [f.to_dict() for f in facts]})
+
+
+class PlanSkill(Skill):
+    manifest = SkillManifest("plan", description="Hand a free-form goal to the brain's council",
+                             args={"goal": "what to achieve, in words"}, tags=("cognition",))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        goal = str(args.get("goal", "")).strip()
+        if not goal:
+            return SkillResult(False, error="plan needs a goal")
+        await ctx.bus.publish("brain/goal", {"goal": goal, "confirmed": bool(args.get("confirmed"))},
+                              source="skill.plan")
+        return SkillResult(True, {"goal": goal})
+
+
+class AnswerSkill(Skill):
+    manifest = SkillManifest("answer", description="Answer the robot's open question",
+                             args={"answer": "proceed | cancel | a new goal"}, tags=("cognition",))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        await ctx.bus.publish("human/answer", {"answer": str(args.get("answer", "")),
+                                               "id": args.get("id")}, source="skill.answer")
+        return SkillResult(True, {"answer": args.get("answer")})
+
+
+class ExplainSkill(Skill):
+    manifest = SkillManifest("explain", description="Explain the brain's latest decision", tags=("cognition",))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        brain = ctx.extras.get("brain")
+        if brain is None or brain.council is None or not brain.council.history:
+            return SkillResult(True, {"explanation": "no deliberation has happened yet",
+                                      "mode": brain.mode if brain else None})
+        d = brain.council.history[-1]
+        return SkillResult(True, {
+            "goal": d.goal,
+            "decision": "approved" if d.approved else ("blocked" if d.hard_blocked else "held for human"),
+            "confidence": round(d.confidence, 2),
+            "rationale": d.plan.rationale,
+            "steps": [s.__dict__ for s in d.plan.steps],
+            "violations": [v.to_dict() for v in d.violations],
+            "critique": d.critique,
+            "prediction": d.rollout.to_dict() if d.rollout else None,
+            "mode_now": brain.mode,
+        })
+
+
+class ForgetSkill(Skill):
+    manifest = SkillManifest("forget", description="Erase everything remembered about a subject",
+                             args={"about": "name or keyword"}, tags=("memory", "privacy"))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        mem = ctx.extras.get("memory")
+        about = str(args.get("about", "")).strip()
+        if mem is None or not about:
+            return SkillResult(False, error="forget needs a subject and the memory module")
+        result = mem.forget(about)
+        ctx.safety.audit.record(ctx.now, "memory", "forget", about=about, **result)
+        return SkillResult(True, {"forgot": about, **result})

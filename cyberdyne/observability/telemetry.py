@@ -38,6 +38,11 @@ class Telemetry(Module):
             "brain": bus.latest_payload("brain/state"),
             "nav": bus.latest_payload("nav/status"),
             "path": bus.latest_payload("nav/path"),
+            "decision": bus.latest_payload("brain/decision"),
+            "question": (bus.latest_payload("brain/question")
+                         if (bus.latest_payload("brain/state") or {}).get("question") else None),
+            "llm": ctx.extras["llm"].describe() if ctx.extras.get("llm") else None,
+            "facts": mem.semantic.all()[-10:] if mem else [],
             "scan": bus.latest_payload("perception/scan"),
             "front_clearance": bus.latest_payload("perception/front_clearance"),
             "cmd": bus.latest_payload("motion/cmd_applied"),

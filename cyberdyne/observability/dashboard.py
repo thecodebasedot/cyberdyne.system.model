@@ -5,6 +5,8 @@
     POST /api/say     {"text": "..."}  -> language/utterance
     POST /api/estop   {"engage": bool} -> safety/estop
     POST /api/goal    {"x":..,"y":..}  -> nav/goal
+    POST /api/plan    {"goal": "..."}  -> brain/goal   (council deliberates)
+    POST /api/answer  {"answer": "..."} -> human/answer
 """
 from __future__ import annotations
 
@@ -77,6 +79,11 @@ class Dashboard(Module):
                     bus.publish_threadsafe(loop, "safety/estop", {"engage": bool(body.get("engage", True)),
                                                                   "reason": "dashboard",
                                                                   "confirmed": True})
+                elif self.path == "/api/answer":
+                    bus.publish_threadsafe(loop, "human/answer", {"answer": str(body.get("answer", "")),
+                                                                  "id": body.get("id")})
+                elif self.path == "/api/plan":
+                    bus.publish_threadsafe(loop, "brain/goal", {"goal": str(body.get("goal", ""))})
                 elif self.path == "/api/goal":
                     bus.publish_threadsafe(loop, "nav/goal", {"x": float(body["x"]), "y": float(body["y"]),
                                                               "name": "dashboard"})

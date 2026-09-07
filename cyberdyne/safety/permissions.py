@@ -35,6 +35,12 @@ DEFAULT_RULES: dict[str, str] = {
     "skill.goto": "log",
     "skill.estop": "free",
     "skill.estop_reset": "confirm",
+    "skill.plan": "log",
+    "skill.answer": "log",
+    "skill.explain": "free",
+    "skill.forget": "log",
+    "skill.remember": "free",
+    "skill.recall": "free",
     "safety.*": "forbidden",       # nothing may reconfigure the safety core at runtime
     "self.modify": "forbidden",
 }

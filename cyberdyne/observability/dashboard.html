@@ -31,6 +31,11 @@
    <button onclick="say()">SEND</button></div>
    <div class="row" style="color:var(--dim)">click the map to set a goal</div></section>
   <section><h2>Brain</h2><table id="brain"></table></section>
+  <section id="qbox" hidden><h2 style="color:var(--amber)">Robot asks</h2><div id="question"></div>
+   <div class="row"><input id="ans" placeholder="proceed / cancel / a new goal" onkeydown="if(event.key==='Enter')answer()">
+   <button class="ok" onclick="answer('proceed')">PROCEED</button><button class="danger" onclick="answer('cancel')">CANCEL</button>
+   <button onclick="answer()">SEND</button></div></section>
+  <section><h2>Council</h2><table id="council"></table></section>
  </div>
  <div class="stack">
   <section><h2>Robot</h2><table id="robot"></table><div class="meter"><i id="batt" style="width:0"></i></div></section>
@@ -44,6 +49,7 @@ const $=id=>document.getElementById(id);
 const cv=$('c'),cx=cv.getContext('2d');let S=null;
 async function post(p,b){await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})}
 function say(){const v=$('say').value.trim();if(!v)return;post('/api/say',{text:v});$('say').value=''}
+function answer(a){const v=a||$('ans').value.trim();if(!v)return;post('/api/answer',{answer:v,id:S&&S.question?S.question.id:null});$('ans').value=''}
 cv.addEventListener('click',e=>{if(!S||!S.world)return;const r=cv.getBoundingClientRect();const w=S.world;
  const x=(e.clientX-r.left)/r.width*w.width,y=(1-(e.clientY-r.top)/r.height)*w.height;post('/api/goal',{x:+x.toFixed(2),y:+y.toFixed(2)})});
 function kv(id,obj){const t=$(id);t.innerHTML='';for(const k in obj){const tr=t.insertRow();tr.insertCell().textContent=k;
@@ -72,6 +78,11 @@ async function poll(){try{S=await (await fetch('/api/state')).json();
   cmd:S.cmd,front_clearance:S.front_clearance!=null?S.front_clearance.toFixed(2)+' m':'-',collisions:S.world.collisions,distance:S.world.distance.toFixed(2)+' m',
   explored:S.world_model?S.world_model.grid.explored:'-',bus:S.bus.published+' msgs / '+S.bus.errors+' errors',memory:S.memory});
  kv('brain',S.brain||{});
+ $('qbox').hidden=!S.question;if(S.question)$('question').textContent=S.question.question+'  ['+S.question.options.join(' / ')+']';
+ const d=S.decision;kv('council',d?{goal:d.goal,approved:d.approved,confidence:(d.confidence*100).toFixed(0)+'%',rationale:d.plan.rationale,
+  steps:d.plan.steps.map(s=>s.skill+' '+JSON.stringify(s.args)).join(' → '),violations:d.violations.map(v=>v.rule+':'+v.detail).join(', ')||'none',
+  critique:d.critique.join('; ')||'none',prediction:d.rollout?`feasible=${d.rollout.feasible} t=${d.rollout.total_time}s d=${d.rollout.total_distance}m batt=${(d.rollout.battery_after*100).toFixed(0)}%`:'-',
+  llm:S.llm?`${S.llm.backend} ${S.llm.model||''} calls=${S.llm.calls||0}`:'rule-based'}:{status:'no deliberation yet'});
  const m=$('mods');m.innerHTML='';if(S.scheduler)for(const x of S.scheduler.modules){const tr=m.insertRow();tr.insertCell().textContent=x.name;
   const c=tr.insertCell();c.textContent=`${x.state} ${x.rate_hz}Hz ticks=${x.stats.ticks} faults=${x.stats.faults} restarts=${x.stats.restarts} miss=${x.stats.deadline_misses}`;c.style.color=x.state==='fault'?'#ff3b3b':''}
  $('events').innerHTML=S.recent.slice().reverse().map(r=>`<div><span style="color:var(--dim)">${r.ts.toFixed(2)}</span> <b>${r.topic}</b> ${JSON.stringify(r.payload)}</div>`).join('');

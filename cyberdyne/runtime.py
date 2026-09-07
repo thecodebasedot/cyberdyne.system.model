@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 
 from .cognition.brain import Brain
+from .cognition.llm import LLMBackend, build_backend
+from .cognition.llm_planner import LLMPlanner
 from .hal.registry import DeviceRegistry
 from .hal.virtual import build_virtual_devices
 from .kernel.bus import MessageBus
@@ -19,6 +21,7 @@ from .kernel.context import Context
 from .kernel.scheduler import Scheduler
 from .kernel.state import StateMachine, SystemState
 from .kernel.watchdog import Watchdog
+from .language.llm_interpreter import LLMInterpreter
 from .language.module import LanguageModule
 from .memory.module import MemoryModule
 from .motion.controller import MotionController
@@ -29,6 +32,7 @@ from .perception.sensors import SensorHub
 from .safety.core import SafetyCore, SafetyGate
 from .sim.scenario import ScenarioEvents
 from .sim.world import Obstacle, Pose, World
+from .skills.registry import SkillRegistry
 from .skills.runner import SkillRunner
 from .world_model.module import WorldModel
 
@@ -71,8 +75,11 @@ class SimStepper:
 
 
 class Runtime:
-    def __init__(self, config: RobotConfig | None = None, clock: Clock | None = None) -> None:
+    def __init__(self, config: RobotConfig | None = None, clock: Clock | None = None,
+                 llm: LLMBackend | None = None) -> None:
         self.config = config or RobotConfig()
+        b = self.config.brain
+        self.llm = llm if llm is not None else build_backend(b.llm, b.model, b.effort)
         k = self.config.kernel
         if clock is None:
             clock = SimClock(realtime_factor=k.realtime_factor) if k.mode == "sim" else WallClock()
@@ -97,11 +104,16 @@ class Runtime:
     def _build_modules(self) -> None:
         self.watchdog = Watchdog()
         self.telemetry = Telemetry()
-        self.brain = Brain()
         self.world_model = WorldModel()
+        registry = SkillRegistry()
+        registry.load_builtin()
+        planner = LLMPlanner(self.llm, effort=self.config.brain.effort) if self.llm else None
+        interpreter = LLMInterpreter(self.llm, registry.describe()) if self.llm else None
+        self.brain = Brain(planner)
+        # SkillRunner registers before Brain so the constitution sees the skill list at setup.
         mods = [SafetyGate(), self.watchdog, SensorHub(), RangePerception(), self.world_model,
-                MotionController(), self.brain, LanguageModule(), SkillRunner(), MemoryModule(),
-                self.telemetry]
+                MotionController(), SkillRunner(registry), self.brain, LanguageModule(interpreter),
+                MemoryModule(), self.telemetry]
         if self.world is not None:
             mods.append(SimStepper.Module(self.world))
         if self.config.events:
@@ -114,6 +126,7 @@ class Runtime:
         self.watchdog.attach(self.scheduler)
         self.telemetry.attach(self.scheduler)
         self.ctx.extras["world_model"] = self.world_model
+        self.ctx.extras["llm"] = self.llm
 
     async def boot(self) -> dict[str, tuple[bool, str]]:
         self.safety.audit.record(self.clock.now(), "runtime", "boot", robot=self.config.name)
@@ -161,4 +174,6 @@ class Runtime:
                 "bus": {"published": self.bus.stats.published, "errors": self.bus.stats.handler_errors},
                 "scheduler": {"frames": self.scheduler.stats.frames, "ticks": self.scheduler.stats.ticks,
                               "faults": self.scheduler.stats.faults},
+                "llm": self.llm.describe() if self.llm else None,
+                "decisions": [d.to_dict() for d in self.brain.council.history[-5:]] if self.brain.council else [],
                 "modules": {m.name: m.state.value for m in self.scheduler.modules}}

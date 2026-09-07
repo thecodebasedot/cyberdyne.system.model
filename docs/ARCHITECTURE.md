@@ -85,6 +85,13 @@ FORBIDDEN in the permission policy).
 * `MemoryModule` turns notable bus events into `EpisodicMemory` episodes with
   importance + recency retrieval and capacity-driven consolidation
   (forgetting); `WorkingMemory` is a TTL scratchpad.
+* `EpisodicMemory.search(text)` is vector-backed through `TextIndex`, whose
+  `Embedder` is pluggable (`HashEmbedder` is dependency-free hashed
+  bag-of-words + trigrams; a sentence-transformer drops in unchanged).
+* `KnowledgeGraph` is semantic memory: (subject, predicate, object) facts,
+  newest wins, neighbour queries. `remember` writes facts, `recall <query>`
+  searches both stores, `forget <x>` erases a subject from every store and
+  audits it (the privacy primitive).
 
 ## Cognition (`cyberdyne/cognition`)
 
@@ -99,11 +106,64 @@ Selector
 └─ idle                         → IDLE or CHARGING if on the pad
 ```
 
-Free-form goals arrive on `brain/goal` and go through a `Planner`.
-`RulePlanner` handles `goto x y`, `patrol`, `charge`, `stop`; an LLM planner
-implements the same `plan(goal, context) -> Plan` and is a constructor
-argument. The brain owns every navigation goal so safety pre-emption
+Free-form goals arrive on `brain/goal` and go through the **council**
+(below). The brain owns every navigation goal so safety pre-emption
 (battery, e-stop) always wins over user requests.
+
+### The council (Phase 2)
+
+```
+brain/goal ──> Perceiver ──> brief ──┐
+                                     ├─> Planner (rule | LLM) ──> Plan
+                                     │        │
+                                     │        ├─> SafetyOfficer: Constitution.review  ─> violations
+                                     │        └─> Critic: MentalSimulator.rollout      ─> confidence, critique
+                                     └─────────────────────────────────────────────────┘
+                                                             │
+                                          Decision{approved | question + options}
+                                                             │
+                              approved ──> brain adopts plan ──> nav/goal / skill/invoke
+                              held     ──> brain/question ──> human/answer ──> proceed | cancel | new goal
+```
+
+* **Perceiver** compresses the bus into a situation brief (pose, battery,
+  e-stop, world bounds, keep-out zones, known entities, explored fraction,
+  available skills with their argument names). The same brief is what the
+  LLM planner sees, so what the model knows is exactly what is logged.
+* **Planner** is `RulePlanner` (goto / patrol / charge / stop) or
+  `LLMPlanner`, which asks the model for a JSON plan and falls back to the
+  rules on any transport, refusal or parse failure. Fallbacks are marked in
+  the plan rationale and lower the critic's confidence.
+* **SafetyOfficer** applies the `Constitution`: unknown skills, forbidden or
+  confirm-tier actions, goals out of bounds, inside obstacles or keep-out
+  zones, plans that are too long. Hard violations (`keep_out`,
+  `out_of_bounds`, `inside_obstacle`, `forbidden_action`, `unknown_skill`)
+  can never be overridden by a human answer; `needs_confirmation` can.
+* **Critic** runs the `MentalSimulator`: an imagined `World` built only from
+  the occupancy grid (belief, not ground truth), each goto rolled out with a
+  kinematic follower on the A* path. It reports reachability, time,
+  distance and predicted battery; confidence falls for infeasible steps,
+  battery below reserve, an unexplored map, long plans or a rule fallback.
+* **Decision** is audited and published on `brain/decision`. Below the
+  confidence threshold, or with any violation, the brain publishes
+  `brain/question` (with options) instead of acting. `human/answer` closes
+  it: `proceed` re-deliberates with confirmation, `cancel` drops it,
+  anything else is a new goal. Unanswered questions time out.
+* **Explain**: the `explain` skill returns the last decision (goal, plan,
+  rationale, violations, critique, prediction) so "keno korle?" has an
+  answer grounded in what actually happened.
+
+### LLM seam (`cognition/llm.py`)
+
+`LLMBackend.complete(system, prompt, effort)` is the only model call in the
+codebase. `AnthropicBackend` uses the official async SDK (`claude-opus-5`
+by default, adaptive thinking, `output_config.effort`, cached system prompt,
+typed error handling, `refusal` stop reason surfaced as `LLMRefused`).
+`ScriptedBackend` returns canned text for tests. `build_backend(kind)` maps
+the `[brain] llm` config value to a backend; `none` runs the robot fully
+rule-based. The `LanguageModule` uses `LLMInterpreter`, which tries the
+rule interpreter first (free, deterministic) and only asks the model for
+utterances the rules do not understand.
 
 ## Motion (`cyberdyne/motion`)
 
@@ -150,7 +210,10 @@ module health, events, audit chain. Commands go back through the bus
 | `perception/scan` | RangePerception | `[{angle, distance}]` |
 | `perception/front_clearance` | RangePerception | metres |
 | `world/summary` | WorldModel | `{explored, entities, grid_updates}` |
-| `brain/goal` | skills / users | `{goal: "goto 3 4"}` |
+| `brain/goal` | skills / users | `{goal: "...", confirmed?}` |
+| `brain/decision` | Brain (council) | `Decision.to_dict()` |
+| `brain/question`, `brain/question_closed` | Brain | `{id, question, options, goal}` / `{id, outcome}` |
+| `human/answer` | dashboard / `answer` skill | `{answer, id?}` |
 | `brain/plan`, `brain/plan_done`, `brain/state`, `brain/lap` | Brain | |
 | `nav/goal`, `nav/cancel` | Brain | `{x, y, name}` |
 | `nav/path`, `nav/status`, `nav/arrived`, `nav/recovery` | MotionController | |
@@ -170,7 +233,10 @@ module health, events, audit chain. Commands go back through the bus
 | Custom RTOS, formal verification (A) | `kernel/` | `Clock`/`Scheduler` contracts, deterministic frames |
 | Custom silicon, FPGA perception (B) | `hal/` drivers | `Device` interface, registry, self-test |
 | Global-workspace cognition, homeostasis, dreaming (C) | `cognition/`, `memory/` | blackboard + BT, episodic consolidation |
-| Custom ML stack, VLA, neural world model (D) | `perception/`, `world_model/`, `cognition/planner.py` | `Planner`, `Interpreter` ABCs |
+| Custom ML stack, VLA, neural world model (D) | `perception/`, `world_model/`, `cognition/planner.py` | `Planner`, `Interpreter`, `LLMBackend`, `Embedder` ABCs |
+| Global workspace / metacognition (C) | `cognition/council.py` | brief -> plan -> critique -> question loop |
+| Constitutional rules over LLM output (F) | `cognition/constitution.py` | deterministic review, hard vs overridable |
+| Mental simulation (C) | `cognition/simulate.py` | belief-only imagined world |
 | Self-modification (E) | `learning/`, `skills/` | `Learner.propose`, `self.modify` FORBIDDEN gate |
 | Runtime verification, shielded RL (F) | `safety/` | `SafetyGate` as sole actuator writer |
 | Robot society / fleet economy (G) | `fleet/` | `FleetMessage`, `Transport` |

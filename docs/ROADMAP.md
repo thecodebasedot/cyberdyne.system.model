@@ -15,13 +15,16 @@
 - [x] CLI: `run`, `check`, `say`, `scenario list`, `skills`
 - [x] 24 tests covering every layer plus end-to-end runs
 
-## Phase 2 — Mind
-- [ ] LLM planner + interpreter (Claude API) behind the existing `Planner` / `Interpreter` ABCs, with the rule versions as guardrails
-- [ ] Multi-agent cognition: perceiver / planner / critic / safety-officer roles
-- [ ] Mental simulation: run a candidate plan in a forked `World` before acting
-- [ ] Vector-backed episodic retrieval; semantic memory (knowledge graph)
-- [ ] Metacognition: confidence estimates, "ask the human" as a first-class action
-- [ ] Constitutional rule layer that checks LLM output against hard rules before dispatch
+## Phase 2 — Mind (done)
+- [x] `LLMBackend` seam; `AnthropicBackend` (official SDK, optional extra) and `ScriptedBackend` for tests
+- [x] `LLMPlanner` + `LLMInterpreter` behind the existing ABCs, rule versions as fallback and fast path
+- [x] Council: Perceiver / Planner / SafetyOfficer / Critic -> audited `Decision`
+- [x] Constitution: deterministic hard-rule review of every plan (bounds, keep-out, obstacles, permissions, unknown skills)
+- [x] Mental simulation on the believed map before acting; feeds the critic's confidence
+- [x] Metacognition: confidence threshold, `brain/question` <-> `human/answer`, timeouts, `explain` skill
+- [x] Semantic memory (knowledge graph), vector-backed episodic search, `forget` privacy primitive
+- [x] Dashboard: council panel, question/answer box, `/api/plan`, `/api/answer`; `council` scenario; 10 tests
+- Deferred to Phase 4: multi-turn dialogue memory for the LLM interpreter; learned confidence calibration
 
 ## Phase 3 — Body
 - [ ] Camera device + object/face detection module; entity tracking with IDs

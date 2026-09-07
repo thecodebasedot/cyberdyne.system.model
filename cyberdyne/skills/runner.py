@@ -17,7 +17,7 @@ from .registry import SkillRegistry
 class SkillRunner(Module):
     name = "skills"
     rate_hz = 10.0
-    priority = 55
+    priority = 45      # before the brain: the constitution reads the registry at setup
 
     def __init__(self, registry: SkillRegistry | None = None, timeout: float = 5.0) -> None:
         super().__init__()

@@ -26,6 +26,9 @@ class Interpreter(ABC):
     @abstractmethod
     def parse(self, text: str) -> Intent | None: ...
 
+    async def parse_async(self, text: str) -> Intent | None:
+        return self.parse(text)
+
 
 _NUM = r"(-?\d+(?:\.\d+)?)"
 _RULES: list[tuple[re.Pattern, str, callable]] = [
@@ -42,6 +45,14 @@ _RULES: list[tuple[re.Pattern, str, callable]] = [
     (re.compile(r"^(?:remember|mone rakho)\s+(\w+)\s*(?:=|is|holo)\s*(.+)$"), "remember",
      lambda m: {"key": m[1], "value": m[2]}),
     (re.compile(r"^(?:recall|what happened|ki hoyeche|mone koro)$"), "recall", lambda m: {}),
+    (re.compile(r"^(?:recall|search memory|khojo)\s+(.+)$"), "recall", lambda m: {"query": m[1]}),
+    (re.compile(r"^(?:explain|why|keno|why did you do that|keno korle)$"), "explain", lambda m: {}),
+    (re.compile(r"^(?:forget|bhule jao)\s+(.+)$"), "forget", lambda m: {"about": m[1]}),
+    (re.compile(r"^(?:answer|uttor|reply)\s+(.+)$"), "answer", lambda m: {"answer": m[1]}),
+    (re.compile(r"^(?:yes|proceed|ha|hae|go ahead|thik ache)$"), "answer", lambda m: {"answer": "proceed"}),
+    (re.compile(r"^(?:no|cancel|na|bad dao)$"), "answer", lambda m: {"answer": "cancel"}),
+    (re.compile(r"^(?:plan|do|task|koro|kaj koro)\s+(.+)$"), "plan", lambda m: {"goal": m[1]}),
+    (re.compile(r"^(?:patrol|patrol koro|ghuro|start patrol)$"), "plan", lambda m: {"goal": "patrol"}),
 ]
 
 
