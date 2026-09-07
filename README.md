@@ -30,8 +30,14 @@ simulation-based tuner for the local controller that the safety gate still
 shields; self-authored macro skills (declarative, constitution-checked,
 owner-gated); and everything learned persisted across runs.
 
-Every later layer of the design (fleets, formal verification) plugs into
-contracts that already exist.
+Phase 5 scales it: typed message schemas with a strict bus, modules that run
+in isolated processes and get respawned when they crash, bus recordings you
+can rewind, a fleet layer (presence, shared sightings, sealed-bid task
+auctions, lock-step multi-robot simulation), over-the-air behaviour bundles
+with health-checked rollback, and an exhaustive verifier for the safety
+core plus a TLA+ spec of the same invariants.
+
+All fifteen layers of the original design now have a home in this tree.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -49,6 +55,9 @@ pip install -e ".[dev]"
 cyberdyne check                       # boot, self-test, 1 s of sim, JSON report
 cyberdyne scenario list               # patrol, estop_drill, voice, sensor_fault, council, home, chores
 cyberdyne train -s patrol -n 6        # tune the local controller in sim; prints [motion] values
+cyberdyne verify                      # exhaustive safety-gate + state-machine check
+cyberdyne fleet -s home -n 3 --auction 9,1   # three robots, one auction
+cyberdyne replay run.jsonl --at 12.5  # what did the robot know at t=12.5 (kernel.record = "run.jsonl")
 cyberdyne run -s patrol -t 300        # 300 sim-seconds as fast as possible
 cyberdyne run -s patrol -d            # real-time with the dashboard on http://127.0.0.1:8080
 cyberdyne say "go to 8 2"             # one-shot command, 20 s run, report
@@ -118,6 +127,10 @@ E-STOP / RESET.
   room, lights off) with retries and timeouts, pauses them to charge and
   resumes; fires routines and reminders; learns a route you demonstrate
   and replays it; suggests what you usually ask for at this hour.
+* Works in a fleet: sees who else is up, shares sightings, bids on offered
+  tasks and lets the closest healthy robot win.
+* Takes behaviour updates over the air and rolls them back by itself if
+  anything faults in the first seconds.
 * Deliberates on free-form goals: refuses goals into keep-out zones or
   obstacles outright, asks before confirm-tier actions or when its own
   prediction is shaky, accepts `proceed` / `cancel` / a new goal, and can
@@ -127,10 +140,10 @@ E-STOP / RESET.
 
 ```
 cyberdyne/
-  kernel/         clock, bus, module, scheduler, watchdog, state machine, config
+  kernel/         clock, bus, module, scheduler, watchdog, state machine, config, schemas, isolation
   hal/            device interfaces, registry, virtual/ backend, serial/ backend, calibration
   sim/            2D world, scenario loader + scripted events
-  safety/         envelope, e-stop, permissions, audit log, SafetyGate
+  safety/         envelope, e-stop, permissions, audit log, SafetyGate, exhaustive verifier
   perception/     sensor hub, range perception, vision + entity tracker
   world_model/    occupancy grid, entity store
   memory/         working + episodic (vector search) + semantic (knowledge graph)
@@ -139,16 +152,17 @@ cyberdyne/
   skills/         manifests, registry, runner, builtin/ (core, home), macro authoring
   language/       rule interpreter, LLM interpreter, language module, voice module
   social/         identity registry (trust), social module
-  observability/  telemetry, dashboard (+ dashboard.html)
+  observability/  telemetry, dashboard (+ dashboard.html), recording/replay
   learning/       user model, demonstration recorder, controller tuner
   tasks/          task model, task runner, routines
   home/           smart-home device hub (virtual / MQTT / Home Assistant)
-  fleet/          reserved (Phase 5)
+  fleet/          transports, bridge (presence + LWW sync), auction, FleetSim
+  ops/            OTA bundles with health-checked rollback
   runtime.py      wires everything from a RobotConfig
   cli.py
 scenarios/        *.toml scenarios
 tests/            unit + end-to-end
-docs/             ARCHITECTURE.md, ROADMAP.md, HARDWARE.md
+docs/             ARCHITECTURE.md, ROADMAP.md, HARDWARE.md, formal/SafetyGate.tla
 ```
 
 ## Writing a skill
@@ -215,7 +229,8 @@ firmware in-process. See [docs/HARDWARE.md](docs/HARDWARE.md).
 ## Development
 
 ```bash
-pytest          # 51 tests, ~25 s
+pytest          # 60 tests, ~40 s
+cyberdyne verify
 ruff check .
 ```
 

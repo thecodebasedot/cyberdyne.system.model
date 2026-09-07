@@ -8,12 +8,9 @@ A step is one of
 """
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
-
-_ids = itertools.count(1)
 
 
 class TaskStatus(StrEnum):
@@ -53,7 +50,7 @@ class TaskStep:
 class Task:
     name: str
     steps: list[TaskStep]
-    id: int = field(default_factory=lambda: next(_ids))
+    id: int = 0                     # assigned by the TaskRunner (per-runtime, deterministic)
     status: TaskStatus = TaskStatus.PENDING
     idx: int = 0
     attempts: int = 0

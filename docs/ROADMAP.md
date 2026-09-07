@@ -49,9 +49,11 @@
 - [x] `Store`: JSON persistence of facts, episodes, user model, taught tasks and macros across runs (`[learning] data_dir`)
 - Follow-ups: mood/affect estimation, RL policy for local control (the tuner is the shielded harness for it), LLM-drafted macros through the same validator
 
-## Phase 5 — Scale
-- [ ] Fleet transport (ZeroMQ / MQTT), shared world model sync (CRDT), task auction
-- [ ] Process isolation per module, Protobuf schemas
-- [ ] Deterministic replay and time-travel debugging from bus history
-- [ ] OTA update, rollback, fleet console
-- [ ] Formal verification of the safety gate (TLA+ model of the state machine + envelope)
+## Phase 5 — Scale (done)
+- [x] Fleet: `Transport` (in-memory hub, UDP broadcast), `FleetBridge` (presence, mirrored topics, LWW entity sync), `AuctionModule` (sealed-bid task allocation with mental-simulation costs), `FleetSim` lock-step harness, `cyberdyne fleet`
+- [x] Typed message schemas (`kernel/schema.py`) with a strict bus mode; every scenario passes strict
+- [x] Process isolation: `PureModule` + `IsolatedModule` host a module in a child process in lock-step; crashes and hangs become watchdog restarts
+- [x] Recording + time-travel: `BusRecorder` (JSON lines), `Recording.state_at / between / digest`, `cyberdyne replay`; determinism test (two runs, one digest)
+- [x] OTA: hashed `Bundle`s of routines / tasks / macros / permissions, validated (never `safety.*`), health-window auto-rollback, manual rollback, `ops/*` topics
+- [x] Formal verification: `safety/verify.py` exhaustively checks the real gate rules and transition table (I1..I8), `cyberdyne verify`; `docs/formal/SafetyGate.tla` for TLC
+- Follow-ups: ZeroMQ/MQTT transports, occupancy-grid CRDT merge, Protobuf wire format, fleet console page, TLC run in CI

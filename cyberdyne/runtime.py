@@ -32,7 +32,9 @@ from .memory.module import MemoryModule
 from .memory.persist import Store
 from .motion.controller import MotionController
 from .observability.dashboard import Dashboard
+from .observability.recording import BusRecorder
 from .observability.telemetry import Telemetry
+from .ops.release import OpsModule
 from .perception.range import RangePerception
 from .perception.sensors import SensorHub
 from .perception.vision import VisionPerception
@@ -118,7 +120,8 @@ class Runtime:
         if clock is None:
             clock = SimClock(realtime_factor=k.realtime_factor) if k.mode == "sim" else WallClock()
         self.clock = clock
-        self.bus = MessageBus(clock, history=k.history)
+        self.bus = MessageBus(clock, history=k.history, strict=k.strict_bus)
+        self.recorder = BusRecorder(self.bus, k.record) if k.record else None
         self.state = StateMachine(self.bus)
         self.devices = DeviceRegistry()
         self.safety = SafetyCore(self.config.safety)
@@ -161,7 +164,7 @@ class Runtime:
         # SkillRunner registers before Brain so the constitution sees the skill list at setup.
         mods = [SafetyGate(), self.watchdog, SensorHub(), RangePerception(), self.world_model,
                 MotionController(), SkillRunner(registry), self.tasks, self.brain, LanguageModule(interpreter),
-                RoutineModule(), MemoryModule(), self.user_model, DemoRecorder(), self.telemetry]
+                RoutineModule(), MemoryModule(), self.user_model, DemoRecorder(), OpsModule(), self.telemetry]
         from .hal.interfaces import DeviceKind
         if self.devices.has(DeviceKind.CAMERA):
             mods += [VisionPerception(), SocialModule()]
@@ -219,6 +222,8 @@ class Runtime:
             self.store.snapshot(self.ctx.extras["memory"], self.user_model.model, self.tasks.describe_library())
         await self.scheduler.teardown_all()
         await self.devices.close_all()
+        if self.recorder:
+            self.recorder.close()
         if self.state.can(SystemState.SHUTDOWN):
             await self.state.transition(SystemState.SHUTDOWN, "runtime shutdown")
         self.safety.audit.record(self.clock.now(), "runtime", "shutdown")
@@ -244,5 +249,7 @@ class Runtime:
                 "scheduler": {"frames": self.scheduler.stats.frames, "ticks": self.scheduler.stats.ticks,
                               "faults": self.scheduler.stats.faults},
                 "llm": self.llm.describe() if self.llm else None,
+                "schema_errors": self.bus.schema_errors,
+                "recorded": self.recorder.count if self.recorder else None,
                 "decisions": [d.to_dict() for d in self.brain.council.history[-5:]] if self.brain.council else [],
                 "modules": {m.name: m.state.value for m in self.scheduler.modules}}

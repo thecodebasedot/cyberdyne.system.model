@@ -78,6 +78,20 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("skills", help="list built-in skills")
 
+    sub.add_parser("verify", help="exhaustively check the safety gate and state machine invariants")
+
+    rp = sub.add_parser("replay", help="inspect a bus recording (kernel.record = path)")
+    rp.add_argument("file")
+    rp.add_argument("--at", type=float, default=None, help="show the robot's knowledge at this sim time")
+    rp.add_argument("--between", nargs=2, type=float, metavar=("T0", "T1"))
+    rp.add_argument("--topic", default=None, help="glob filter for --between")
+
+    fl = sub.add_parser("fleet", help="run several robots in lock-step simulation")
+    fl.add_argument("--scenario", "-s", default="patrol")
+    fl.add_argument("--robots", "-n", type=int, default=3)
+    fl.add_argument("--duration", "-t", type=float, default=120.0)
+    fl.add_argument("--auction", default=None, help="offer this goto target (x,y) to the fleet at t=5")
+
     tr = sub.add_parser("train", help="tune the local controller in simulation (shielded by the safety gate)")
     tr.add_argument("--scenario", "-s", default="patrol")
     tr.add_argument("--episodes", "-n", type=int, default=6)
@@ -98,6 +112,50 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{m['name']:<12} {m['permission']:<20} {m['description']}")
         return 0
 
+    if args.cmd == "verify":
+        from .safety.verify import verify_all
+        res = verify_all()
+        print(json.dumps(res, indent=2))
+        return 0 if res["ok"] else 1
+    if args.cmd == "replay":
+        from .observability.recording import Recording
+        rec = Recording.load(args.file)
+        if args.at is not None:
+            print(json.dumps(rec.state_at(args.at), indent=1, default=str))
+        elif args.between:
+            for m in rec.between(args.between[0], args.between[1], args.topic):
+                print(f"{m['ts']:8.3f} {m['topic']:<28} {json.dumps(m['payload'], default=str)[:100]}")
+        else:
+            print(json.dumps(rec.summary(), indent=2))
+        return 0
+    if args.cmd == "fleet":
+        import copy
+
+        from .fleet.sim import FleetSim
+        base = load_scenario(args.scenario)
+        cfgs = []
+        for i in range(args.robots):
+            c = copy.deepcopy(base)
+            c.name = f"{base.name}-{i + 1}"
+            c.dashboard.enabled = False
+            c.world.robot_start = {"x": 1.0 + i * 1.2, "y": 1.0, "theta": 0.0}
+            cfgs.append(c)
+
+        async def run_fleet():
+            fs = FleetSim(cfgs)
+            await fs.boot()
+            if args.auction:
+                x, y = (float(v) for v in args.auction.split(","))
+                await fs.run(5)
+                await fs.robots[0].bus.publish("fleet/auction", {"name": "offered", "steps": [
+                    {"kind": "goto", "args": {"x": x, "y": y, "name": "offered"}}]}, source="cli")
+                await fs.run(max(0.0, args.duration - 5))
+            else:
+                await fs.run(args.duration)
+            await fs.shutdown()
+            return fs.report()
+        print(json.dumps(asyncio.run(run_fleet()), indent=2, default=str))
+        return 0
     if args.cmd == "train":
         from .learning.tuner import ControllerTuner
         cfg = load_scenario(args.scenario)

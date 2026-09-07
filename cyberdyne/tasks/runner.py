@@ -29,6 +29,7 @@ class TaskRunner(Module):
         self.queue: list[Task] = []
         self.history: list[Task] = []
         self.completed = self.failed = 0
+        self._next_id = 1
 
     async def setup(self, ctx: Context) -> None:
         self.ctx = ctx
@@ -63,7 +64,9 @@ class TaskRunner(Module):
             steps = list(self.library[name])
         else:
             steps = [TaskStep.from_dict(s) for s in raw]
-        task = Task(name, steps, origin=str(p.get("origin", msg.source)), trust=str(p.get("trust", "owner")))
+        task = Task(name, steps, id=self._next_id, origin=str(p.get("origin", msg.source)),
+                    trust=str(p.get("trust", "owner")))
+        self._next_id += 1
         if self.task and self.task.active and p.get("queue"):
             self.queue.append(task)
             return

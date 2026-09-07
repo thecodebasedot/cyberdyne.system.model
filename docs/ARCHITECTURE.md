@@ -152,6 +152,46 @@ FORBIDDEN in the permission policy).
   facts, episodes, the user model, taught tasks and macros are written as
   JSON at shutdown and loaded at boot.
 
+## Scale (Phase 5)
+
+* **Schemas** (`kernel/schema.py`): every important topic declares a payload
+  shape. `MessageBus(strict=True)` validates on publish; a drifting module
+  fails at its own `publish` instead of corrupting a neighbour. All
+  scenarios run strict in the test suite.
+* **Process isolation** (`kernel/isolation.py`): a `PureModule` is
+  `compute(dt, inputs) -> outputs`. `IsolatedModule` runs it in a child
+  process and drives it in lock-step (send inputs, wait with a timeout,
+  publish outputs). A crash or hang is a normal module fault; the watchdog
+  restart respawns the process. Determinism is kept because the parent
+  waits.
+* **Recording and time-travel** (`observability/recording.py`):
+  `kernel.record = path` taps the bus into JSON lines. `Recording`
+  answers `state_at(t)` (what every module could see), `between(t0, t1)`
+  and `digest()`. Two runs of the same scenario produce the same digest,
+  which is the kernel's determinism claim, tested.
+* **Fleet** (`fleet/`): `FleetBridge` sends heartbeats (state, pose,
+  battery, task), mirrors a few topics (`security/alert`, `task/done`,
+  ...) as `fleet/<robot>/<topic>`, and syncs entity sightings as a
+  last-writer-wins map keyed on observation time, so two robots that see
+  the same person converge without coordination. `AuctionModule` runs
+  sealed-bid allocation: cost = predicted travel time (mental simulation on
+  the believed map) + battery + busy penalties; robots in e-stop or with a
+  low battery do not bid; ties break on name. `FleetSim` runs N runtimes
+  on one clock, frame by frame. Transports: in-memory hub, UDP broadcast.
+* **OTA** (`ops/`): a `Bundle` (routines, tasks, macros, permission
+  overrides; never `safety.*`, `kernel`, `hardware`) is validated
+  (constitution for macros), activated, then watched for a health window:
+  any module fault, task failure or e-stop rolls it back to the previous
+  bundle; otherwise it commits. Everything is audited.
+* **Verification** (`safety/verify.py`): an exhaustive check over the real
+  `SafetyGate` rule order (`gate_decision`, shared with the module) and the
+  real transition table: e-stop zeroes both velocities, critical battery /
+  stale perception / short clearance forbid forward motion, the envelope is
+  never exceeded, ESTOP exits only to DIAGNOSTIC or SHUTDOWN, every
+  operational state reaches ESTOP in one step, BOOT cannot skip
+  DIAGNOSTIC. `docs/formal/SafetyGate.tla` states the same invariants for
+  TLC.
+
 ## Perception → World model → Memory
 
 * `SensorHub` publishes `sensor/odometry|battery|imu`.
@@ -305,6 +345,9 @@ module health, events, audit chain. Commands go back through the bus
 | `home/device` | `device` skill | `SmartDevice.to_dict()` |
 | `recorder/status` | DemoRecorder | `{recording, steps}` |
 | `skill/defined` | `define_skill` | macro spec |
+| `fleet/peers`, `fleet/peer_lost`, `fleet/<robot>/<topic>` | FleetBridge | |
+| `fleet/auction`, `fleet/bid_placed`, `fleet/awarded`, `fleet/auction_failed` | AuctionModule | |
+| `ops/update`, `ops/rollback` -> `ops/activated`, `ops/committed`, `ops/rolled_back`, `ops/rejected` | OpsModule | |
 | `nav/goal`, `nav/cancel` | Brain | `{x, y, name}` |
 | `nav/path`, `nav/status`, `nav/arrived`, `nav/recovery` | MotionController | |
 | `motion/cmd` | MotionController | `{linear, angular}` requested |
@@ -331,7 +374,11 @@ module health, events, audit chain. Commands go back through the bus
 | Learning (D, C) | `learning/` | demonstration recorder, user model, shielded tuner |
 | Long-horizon tasks, routines (9) | `tasks/`, `home/` | TaskRunner pause/resume, routines, device hub |
 | Runtime verification, shielded RL (F) | `safety/` | `SafetyGate` as sole actuator writer |
-| Robot society / fleet economy (G) | `fleet/` | `FleetMessage`, `Transport` |
+| Robot society / fleet economy (G) | `fleet/` | bridge, LWW entity sync, sealed-bid auction, FleetSim |
+| Runtime verification (F) | `safety/verify.py`, `docs/formal/` | exhaustive gate + state-machine check, TLA+ spec |
+| Ops, OTA, rollback (N) | `ops/` | hashed bundles, health-window rollback |
+| Process isolation, typed schemas (0) | `kernel/isolation.py`, `kernel/schema.py` | lock-step child processes, strict bus |
+| Time-travel debugging (13) | `observability/recording.py` | JSONL recording, state_at, digest |
 | Deep human modelling (H) | `social/`, `world_model/entities.py`, `memory/` | `IdentityRegistry`, trust, `EntityStore` with rooms |
 | Custom silicon / real drivers (B) | `hal/serial`, `hal/calibration.py` | line protocol, loopback firmware, calibration |
 | Security hardening, immune system (I, J) | `safety/audit.py`, `kernel/watchdog.py` | hash chain, restart budget |

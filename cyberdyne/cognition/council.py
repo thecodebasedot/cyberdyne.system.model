@@ -10,15 +10,12 @@ The council never actuates anything; the brain executes approved decisions.
 """
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass, field
 
 from ..kernel.context import Context
 from .constitution import Constitution, RuleViolation
 from .planner import Plan, Planner
 from .simulate import MentalSimulator, Rollout
-
-_ids = itertools.count(1)
 
 
 @dataclass
@@ -125,6 +122,7 @@ class Council:
         self.critic = Critic(simulator)
         self.threshold = confidence_threshold
         self.history: list[Decision] = []
+        self._next_id = 1                     # per-council, so recordings of two runs are identical
 
     async def deliberate(self, goal: str, human_confirmed: bool = False) -> Decision:
         skills = self.ctx.extras["skills"].describe() if "skills" in self.ctx.extras else []
@@ -150,8 +148,9 @@ class Council:
             question = f"I'm only {confidence:.0%} confident about '{goal}' " + \
                        f"({'; '.join(critique)}). Proceed anyway?"
             options = ["proceed", "cancel"]
-        d = Decision(next(_ids), goal, plan, brief, violations, rollout, confidence, approved,
+        d = Decision(self._next_id, goal, plan, brief, violations, rollout, confidence, approved,
                      question, options, critique)
+        self._next_id += 1
         self.history.append(d)
         self.ctx.safety.audit.record(self.ctx.now, "council", "decision", id=d.id, goal=goal,
                                      approved=approved, confidence=round(confidence, 2),

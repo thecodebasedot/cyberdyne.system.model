@@ -18,6 +18,8 @@ class KernelConfig:
     realtime_factor: float | None = None   # None = as fast as possible (sim only)
     log_level: str = "INFO"
     history: int = 2000
+    strict_bus: bool = False        # validate every payload against kernel.schema
+    record: str = ""                # path: write every bus message as JSON lines (replay / time-travel)
 
 
 @dataclass

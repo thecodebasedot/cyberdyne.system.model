@@ -38,6 +38,7 @@
   <section><h2>Council</h2><table id="council"></table></section>
   <section><h2>Social</h2><table id="social"></table></section>
   <section><h2>Tasks &amp; Home</h2><table id="tasks"></table></section>
+  <section><h2>Fleet &amp; Ops</h2><table id="fleet"></table></section>
  </div>
  <div class="stack">
   <section><h2>Robot</h2><table id="robot"></table><div class="meter"><i id="batt" style="width:0"></i></div></section>
@@ -88,6 +89,10 @@ async function poll(){try{S=await (await fetch('/api/state')).json();
   routines:(S.routines||[]).map(r=>r.name+(r.every?' every '+r.every+'s':'')+(r.at?' at '+r.at:'')+' x'+r.fired).join(', ')||'none',
   devices:(S.devices||[]).map(d=>`${d.room} ${d.kind}=${d.state.on?'ON':'off'}`).join(', ')||'none',
   recording:S.recorder?S.recorder.recording+' ('+S.recorder.steps+' steps)':'-',suggestion:S.suggestion?S.suggestion.person+': '+S.suggestion.request:'-'});
+ kv('fleet',{peers:(S.peers||[]).map(p=>`${p.robot} [${p.state}]${p.battery?' '+(p.battery.level*100).toFixed(0)+'%':''}`).join(', ')||'none',
+  auction:S.auction?`won ${S.auction.won} lost ${S.auction.lost} open ${S.auction.open.length}`:'-',
+  release:S.ops&&S.ops.active?`${S.ops.active.version} (${S.ops.active.hash})${S.ops.health_pending?' health check…':''}`:'none'});
+ for(const p of (S.peers||[])){if(p.pose){cx.strokeStyle='#7dd3fc';cx.beginPath();cx.arc(p.pose.x*sx,Y(p.pose.y),0.2*sx,0,7);cx.stroke();cx.fillStyle='#7dd3fc';cx.fillText(p.robot,p.pose.x*sx+8,Y(p.pose.y)-6)}}
  kv('social',{room:S.room?S.room.name:'-',tracks:(S.tracks||[]).map(t=>t.kind+'#'+t.track_id+(t.signature?'':' (unknown)')).join(', ')||'none',
   said:(S.speech||[]).map(x=>'"'+x.text+'"').join(' '),alerts:(S.alerts||[]).length});
  $('qbox').hidden=!S.question;if(S.question)$('question').textContent=S.question.question+'  ['+S.question.options.join(' / ')+']';
