@@ -25,17 +25,36 @@ from ..registry import DeviceRegistry
 
 
 class VirtualDrive(DriveBase):
+    """With ``noise`` > 0 the reported odometry is dead-reckoned from the true
+    motion with per-metre slip, so it drifts like real wheel encoders do."""
     device_id = "drive.virtual"
 
-    def __init__(self, world: World) -> None:
+    def __init__(self, world: World, noise: float = 0.0, seed: int = 3) -> None:
         self.world = world
+        self.noise = noise
+        self._rng = random.Random(seed)
+        self._last_true: tuple[float, float, float] | None = None
+        self._ox, self._oy, self._oth = world.robot.x, world.robot.y, world.robot.theta
 
     async def set_velocity(self, linear: float, angular: float) -> None:
         self.world.cmd = Twist(linear, angular)
 
     async def odometry(self) -> Odometry:
         p, c = self.world.robot, self.world.cmd
-        return Odometry(p.x, p.y, p.theta, c.linear, c.angular)
+        if not self.noise:
+            return Odometry(p.x, p.y, p.theta, c.linear, c.angular)
+        if self._last_true is None:
+            self._last_true = (p.x, p.y, p.theta)
+        lx, ly, lth = self._last_true
+        d = math.hypot(p.x - lx, p.y - ly)
+        dth = math.atan2(math.sin(p.theta - lth), math.cos(p.theta - lth))
+        self._last_true = (p.x, p.y, p.theta)
+        d *= 1.0 + self._rng.gauss(0, self.noise)
+        dth += self._rng.gauss(0, self.noise) * d * 2.0 + self._rng.gauss(0, self.noise * 0.02)
+        self._oth = math.atan2(math.sin(self._oth + dth), math.cos(self._oth + dth))
+        self._ox += d * math.cos(self._oth)
+        self._oy += d * math.sin(self._oth)
+        return Odometry(self._ox, self._oy, self._oth, c.linear, c.angular)
 
 
 class VirtualRangeSensor(RangeSensor):
@@ -99,11 +118,14 @@ class VirtualBattery(Battery):
 class VirtualIMU(IMU):
     device_id = "imu.virtual"
 
-    def __init__(self, world: World) -> None:
+    def __init__(self, world: World, noise: float = 0.0, seed: int = 4) -> None:
         self.world = world
+        self.noise = noise
+        self._rng = random.Random(seed)
 
     async def read(self) -> IMUReading:
-        return IMUReading(self.world.robot.theta, self.world.cmd.angular)
+        h = self.world.robot.theta + (self._rng.gauss(0, self.noise) if self.noise else 0.0)
+        return IMUReading(h, self.world.cmd.angular)
 
 
 class VirtualCamera(Camera):
@@ -146,7 +168,13 @@ class VirtualMicrophone(Microphone):
         self._queue: list[Utterance] = []
 
     def inject(self, text: str, signature: str = "", loudness: float = 1.0) -> None:
-        self._queue.append(Utterance(text, self.world.time, signature, loudness))
+        bearing = None
+        for a in self.world.active_actors():           # sound-source localisation: who is at that signature?
+            if a.signature == signature and signature:
+                p = self.world.robot
+                b = math.atan2(a.y - p.y, a.x - p.x) - p.theta
+                bearing = math.atan2(math.sin(b), math.cos(b))
+        self._queue.append(Utterance(text, self.world.time, signature, loudness, bearing))
 
     async def listen(self) -> list[Utterance]:
         out, self._queue = self._queue, []
@@ -164,10 +192,10 @@ class VirtualSpeaker(Speaker):
 
 
 def build_virtual_devices(world: World, cfg: WorldConfig, registry: DeviceRegistry) -> None:
-    registry.register(VirtualDrive(world))
+    registry.register(VirtualDrive(world, cfg.odometry_noise))
     registry.register(VirtualRangeSensor(world))
     registry.register(VirtualBattery(world, cfg))
-    registry.register(VirtualIMU(world))
+    registry.register(VirtualIMU(world, cfg.imu_noise))
     registry.register(VirtualCamera(world))
     registry.register(VirtualMicrophone(world))
     registry.register(VirtualSpeaker())

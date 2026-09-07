@@ -197,3 +197,13 @@ class ArmSkill(Skill):
         await ctx.bus.publish("security/arm", {"armed": armed}, source="skill.arm")
         ctx.safety.audit.record(ctx.now, "skills", "security.arm", armed=armed)
         return SkillResult(True, {"armed": armed, "speech": "Security armed." if armed else "Security disarmed."})
+
+
+class DescribeSkill(Skill):
+    manifest = SkillManifest("describe", description="Describe the scene (what and who is where)", tags=("world",))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        wm = ctx.extras.get("world_model")
+        scene = wm.scene if wm else {"summary": "no world model"}
+        anomalies = [m.payload for m in ctx.bus.history("world/anomaly", 5)]
+        return SkillResult(True, {"scene": scene, "anomalies": anomalies, "speech": scene.get("summary", "")})

@@ -51,6 +51,7 @@ _RULES: list[tuple[re.Pattern, str, callable]] = [
     (re.compile(r"^(?:answer|uttor|reply)\s+(.+)$"), "answer", lambda m: {"answer": m[1]}),
     (re.compile(r"^(?:yes|proceed|ha|hae|go ahead|thik ache)$"), "answer", lambda m: {"answer": "proceed"}),
     (re.compile(r"^(?:no|cancel|na|bad dao)$"), "answer", lambda m: {"answer": "cancel"}),
+    (re.compile(r"^(?:describe|what do you see|look around|ki dekhcho|charpashe ki|scene)$"), "describe", lambda m: {}),
     (re.compile(r"^(?:where is|where are|find)\s+(?:my |the )?([\w ]+?)$"), "find", lambda m: {"name": m[1]}),
     (re.compile(r"^(?:amar |amr )?([\w ]+?)\s+(?:kothay|koi)$"), "find", lambda m: {"name": m[1]}),
     (re.compile(r"^(?:go to|goto|go near|jao|cholo)\s+(?:the )?([a-z][\w ]*?)$"), "plan",

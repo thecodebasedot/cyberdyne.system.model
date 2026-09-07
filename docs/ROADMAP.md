@@ -59,3 +59,16 @@
 - [x] OTA: hashed `Bundle`s of routines / tasks / macros / permissions, validated (never `safety.*`), health-window auto-rollback, manual rollback, `ops/*` topics
 - [x] Formal verification: `safety/verify.py` exhaustively checks the real gate rules and transition table (I1..I8), `cyberdyne verify`; `docs/formal/SafetyGate.tla` for TLC
 - Follow-ups: ZeroMQ/MQTT transports, occupancy-grid CRDT merge, Protobuf wire format, fleet console page, TLC run in CI
+
+## Batch 1 — Kernel + dev/ops gaps (done)
+- [x] GitHub Actions CI (pytest 3.11/3.12, ruff, verify, check, firmware g++, bench); Dockerfile + docker-compose
+- [x] Resource governor (per-module CPU budget, throttle + recover), hot reload (`kernel/reload`), fleet clock sync
+- [x] Prometheus `/metrics`; `cyberdyne.testing` harness; `cyberdyne skill new`; `cyberdyne bench`
+
+## Batch 2 — Perception + world gaps (done)
+- [x] Wheel-slip odometry + IMU noise in the sim; `PoseFilter` (odometry + IMU + wall landmarks + charger fix); fused pose on `sensor/odometry`, raw on `sensor/odometry_raw`
+- [x] People motion prediction (`perception/predictions`), used by social navigation
+- [x] Scene graph (`world/scene`, `describe` skill), anomaly detection (`world/anomaly`: displaced, new_object, unusual_hour)
+- [x] Sound-source bearing on utterances; idle robot turns to the speaker (`nav/face`)
+- [x] Affect lexicon (English + Banglish) -> `language/affect`, per-person mood in the user model
+- [x] PyBullet backend (`mode = "bullet"`): rigid-body robot, box obstacles, kinematic actors, ray-cast range, occlusion camera

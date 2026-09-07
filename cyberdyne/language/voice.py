@@ -13,6 +13,7 @@ import re
 from ..hal.interfaces import DeviceKind, Microphone, Speaker
 from ..kernel.context import Context
 from ..kernel.module import Module
+from .affect import mood
 
 
 class VoiceModule(Module):
@@ -48,7 +49,8 @@ class VoiceModule(Module):
 
     def _on_result(self, msg) -> None:
         p = msg.payload or {}
-        if p.get("skill") in ("echo", "status", "time", "find", "explain") and p.get("ok"):
+        spoken = ("echo", "status", "time", "find", "explain", "describe", "device", "remind")
+        if p.get("skill") in spoken and p.get("ok"):
             out = p.get("output")
             text = out if isinstance(out, str) else (out.get("speech") if isinstance(out, dict) else None)
             if text:
@@ -72,6 +74,13 @@ class VoiceModule(Module):
                                       source=self.name)
                     continue
                 self.heard += 1
+                score, words = mood(u.text)
+                if words:
+                    await bus.publish("language/affect", {"speaker": person.name if person else None,
+                                                          "mood": round(score, 2), "words": words}, source=self.name)
+                if u.bearing is not None:
+                    await bus.publish("speech/heard", {"bearing": round(u.bearing, 3),
+                                                       "speaker": person.name if person else None}, source=self.name)
                 await bus.publish("language/utterance",
                                   {"text": text.strip(), "speaker": person.name if person else None,
                                    "trust": trust, "signature": u.signature, "addressed": addressed,

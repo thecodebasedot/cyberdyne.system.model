@@ -27,9 +27,19 @@ class SocialModule(Module):
         self.armed = cfg.armed
         ctx.extras["identity"] = self.identity
         self._sub = ctx.bus.subscribe("security/arm", self._on_arm, name="social.arm")
+        self._sub_heard = ctx.bus.subscribe("speech/heard", self._on_heard, name="social.heard")
+        self.turned_to_speaker = 0
 
     async def teardown(self) -> None:
         self.ctx.bus.unsubscribe(self._sub)
+        self.ctx.bus.unsubscribe(self._sub_heard)
+
+    async def _on_heard(self, msg) -> None:
+        """Sound-source localisation: when idle, turn towards whoever is talking."""
+        nav = self.ctx.bus.latest_payload("nav/status") or {}
+        if nav.get("state", "idle") == "idle" and abs(msg.payload["bearing"]) > 0.3:
+            self.turned_to_speaker += 1
+            await self.ctx.bus.publish("nav/face", {"bearing": msg.payload["bearing"]}, source=self.name)
 
     def _on_arm(self, msg) -> None:
         self.armed = bool((msg.payload or {}).get("armed", True))

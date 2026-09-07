@@ -19,6 +19,12 @@ class UserModel:
     counts: dict[str, dict[str, dict[str, int]]] = field(default_factory=lambda: defaultdict(
         lambda: defaultdict(lambda: defaultdict(int))))          # person -> hour -> request -> n
     totals: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    mood: dict[str, float] = field(default_factory=dict)          # person -> exponential moving average
+
+    def observe_mood(self, person: str, score: float, alpha: float = 0.3) -> float:
+        prev = self.mood.get(person, 0.0)
+        self.mood[person] = round(prev + alpha * (score - prev), 3)
+        return self.mood[person]
 
     @staticmethod
     def bucket(hour: int) -> str:
@@ -41,7 +47,7 @@ class UserModel:
 
     def to_dict(self) -> dict:
         return {"counts": {p: {b: dict(r) for b, r in hb.items()} for p, hb in self.counts.items()},
-                "totals": dict(self.totals)}
+                "totals": dict(self.totals), "mood": dict(self.mood)}
 
     @classmethod
     def from_dict(cls, d: dict) -> UserModel:
@@ -52,6 +58,7 @@ class UserModel:
                     m.counts[p][b][r] = int(n)
         for p, n in (d.get("totals") or {}).items():
             m.totals[p] = int(n)
+        m.mood = {p: float(v) for p, v in (d.get("mood") or {}).items()}
         return m
 
 
@@ -71,12 +78,19 @@ class UserModelModule(Module):
         self.ctx = ctx
         self._sub = ctx.bus.subscribe("language/intent", self._on_intent, name="user_model.intent")
         self._sub2 = ctx.bus.subscribe("language/utterance", self._on_utterance, name="user_model.utt")
+        self._sub3 = ctx.bus.subscribe("language/affect", self._on_affect, name="user_model.affect")
         self._speaker: str | None = None
         ctx.extras["user_model"] = self
 
     async def teardown(self) -> None:
         self.ctx.bus.unsubscribe(self._sub)
         self.ctx.bus.unsubscribe(self._sub2)
+        self.ctx.bus.unsubscribe(self._sub3)
+
+    def _on_affect(self, msg) -> None:
+        p = msg.payload
+        if p.get("speaker"):
+            self.model.observe_mood(p["speaker"], float(p["mood"]))
 
     def _on_utterance(self, msg) -> None:
         self._speaker = (msg.payload or {}).get("speaker")

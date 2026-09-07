@@ -47,8 +47,10 @@ class MotionController(Module):
         self._backoff_ticks = 0
         self._last_plan_at = -math.inf
         self._commit: float | None = None       # world-frame heading we committed to
+        self._face: float | None = None            # absolute heading to turn to (nav/face)
         self._subs = [ctx.bus.subscribe("nav/goal", self._on_goal, name="motion.goal"),
-                      ctx.bus.subscribe("nav/cancel", self._on_cancel, name="motion.cancel")]
+                      ctx.bus.subscribe("nav/cancel", self._on_cancel, name="motion.cancel"),
+                      ctx.bus.subscribe("nav/face", self._on_face, name="motion.face")]
 
     async def teardown(self) -> None:
         for s in self._subs:
@@ -64,6 +66,12 @@ class MotionController(Module):
     def _on_cancel(self, msg) -> None:
         self.goal = None
         self.path = []
+        self._face = None
+
+    def _on_face(self, msg) -> None:
+        pose = self.ctx.bus.latest_payload("sensor/odometry")
+        if pose and self.goal is None:
+            self._face = _wrap(pose["theta"] + float(msg.payload["bearing"]))
 
     # -- global ----------------------------------------------------------------
     async def _replan(self, pose: dict) -> None:
@@ -73,7 +81,11 @@ class MotionController(Module):
             self.path = []
             return
         space = self.ctx.config.social.personal_space
-        people = [(p["x"], p["y"], space, 6.0) for p in self.ctx.bus.latest_payload("perception/people", []) or []]
+        people = []
+        for p in self.ctx.bus.latest_payload("perception/people", []) or []:
+            people.append((p["x"], p["y"], space, 6.0))
+            if "px" in p:
+                people.append((p["px"], p["py"], space, 3.0))     # where they will be, half weight
         self.path = self.planner.plan(wm.grid, (pose["x"], pose["y"]), (self.goal["x"], self.goal["y"]), people)
         await self.ctx.bus.publish("nav/path", {"points": self.path, "goal": self.goal}, source=self.name)
 
@@ -108,8 +120,16 @@ class MotionController(Module):
     async def tick(self, dt: float) -> None:
         bus = self.ctx.bus
         if self.goal is None:
-            await bus.publish("motion/cmd", {"linear": 0.0, "angular": 0.0}, source=self.name)
-            await bus.publish("nav/status", {"state": "idle"}, source=self.name)
+            ang = 0.0
+            pose = bus.latest_payload("sensor/odometry")
+            if self._face is not None and pose:
+                err = _wrap(self._face - pose["theta"])
+                if abs(err) < 0.08:
+                    self._face = None
+                else:
+                    ang = max(-self.max_ang, min(self.max_ang, 2.5 * err))
+            await bus.publish("motion/cmd", {"linear": 0.0, "angular": ang}, source=self.name)
+            await bus.publish("nav/status", {"state": "turning" if ang else "idle"}, source=self.name)
             return
         pose = bus.latest_payload("sensor/odometry")
         if pose is None:

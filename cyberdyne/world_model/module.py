@@ -13,8 +13,10 @@ from ..hal.interfaces import DeviceKind, RangeSensor
 from ..kernel.context import Context
 from ..kernel.module import Module
 from ..sim.world import Obstacle
+from .anomaly import AnomalyDetector
 from .entities import EntityStore
 from .grid import OccupancyGrid
+from .scene import describe, relations
 
 
 class WorldModel(Module):
@@ -38,6 +40,11 @@ class WorldModel(Module):
             self.entities.observe(f"waypoint_{i}", "waypoint", p["x"], p["y"], ctx.now, index=i,
                                   room=self.room_of(p["x"], p["y"]))
         self._sub = ctx.bus.subscribe("world/observe", self._on_observe, name="world_model.observe")
+        self.anomalies = AnomalyDetector(ctx.config.perception.anomaly_displacement)
+        self.hour_fn = lambda: __import__("time").localtime().tm_hour
+        self._scene_due = 0.0
+        self.scene: dict = {"room": None, "relations": [], "summary": ""}
+        self._pending_anomalies: list[dict] = []
 
     async def teardown(self) -> None:
         self.ctx.bus.unsubscribe(self._sub)
@@ -50,8 +57,10 @@ class WorldModel(Module):
 
     def _on_observe(self, msg) -> None:
         p = msg.payload
-        self.entities.observe(p["id"], p["kind"], p["x"], p["y"], self.ctx.now,
-                              room=self.room_of(p["x"], p["y"]), **(p.get("attrs") or {}))
+        e = self.entities.observe(p["id"], p["kind"], p["x"], p["y"], self.ctx.now,
+                                  room=self.room_of(p["x"], p["y"]), **(p.get("attrs") or {}))
+        bucket = {0: "night", 1: "morning", 2: "afternoon", 3: "evening"}[min(3, self.hour_fn() // 6)]
+        self._pending_anomalies += self.anomalies.observe(e.to_dict(), self.ctx.now, bucket)
 
     def places(self) -> dict[str, tuple[float, float]]:
         """Name -> coordinates for everything the planner may target by name."""
@@ -80,6 +89,16 @@ class WorldModel(Module):
             if room != self.current_room:
                 self.current_room = room
                 await bus.publish("world/room", {"name": room}, source=self.name)
+        for a in self._pending_anomalies:
+            self.ctx.safety.audit.record(self.ctx.now, "world", f"anomaly.{a['kind']}", id=a["id"], detail=a["detail"])
+            await bus.publish("world/anomaly", a, source=self.name)
+        self._pending_anomalies.clear()
+        if self.ctx.now >= self._scene_due:
+            self._scene_due = self.ctx.now + 1.0
+            rel = relations(self.entities.all(), pose, now=self.ctx.now)
+            self.scene = {"room": self.current_room, "relations": [list(r) for r in rel],
+                          "summary": describe(rel, self.current_room)}
+            await bus.publish("world/scene", self.scene, source=self.name)
         await bus.publish("world/summary", {"explored": round(self.grid.explored_fraction(), 3),
                                             "entities": len(self.entities.all()),
                                             "grid_updates": self.grid.updates,
@@ -87,4 +106,4 @@ class WorldModel(Module):
 
     def snapshot(self) -> dict:
         return {"grid": self.grid.to_dict(), "entities": self.entities.all(),
-                "rooms": [r.to_dict() for r in self.rooms], "room": self.current_room}
+                "rooms": [r.to_dict() for r in self.rooms], "room": self.current_room, "scene": self.scene}

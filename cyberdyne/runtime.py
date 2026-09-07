@@ -129,6 +129,7 @@ class Runtime:
         self.safety = SafetyCore(self.config.safety)
         self.world: World | None = None
         self.bridge = None
+        self.bullet = None
         if k.mode == "sim":
             w = self.config.world
             self.world = World(width=w.width, height=w.height, obstacles=[Obstacle(**o) for o in w.obstacles],
@@ -138,6 +139,14 @@ class Runtime:
                                        for a in w.actors],
                                robot=Pose(**w.robot_start), charger=(w.charger["x"], w.charger["y"]))
             build_virtual_devices(self.world, w, self.devices)
+        elif k.mode == "bullet":
+            from .hal.bullet import build_bullet_devices
+            w = self.config.world
+            actors = [Actor(a["id"], a.get("kind", "person"), a["x"], a["y"], a.get("signature", ""),
+                            [tuple(pt) for pt in a.get("route", [])], a.get("speed", 0.5), a.get("radius", 0.3),
+                            a.get("active_from", 0.0)) for a in w.actors]
+            self.bullet = build_bullet_devices(w, actors, self.devices)
+            self.world = self.bullet.mirror              # 2D mirror for dashboard / mental sim
         elif k.mode == "serial":
             self.bridge = build_serial_devices(self.config.hardware, self.devices)
         elif k.mode == "rpi":
@@ -146,7 +155,7 @@ class Runtime:
             self.bridge = build_rpi_devices(h, self.devices, None if h.camera_index < 0 else h.camera_index,
                                             h.vosk_model or None, h.tts)
         else:
-            raise ValueError(f"unknown kernel mode {k.mode!r}; use 'sim', 'serial' or 'rpi'")
+            raise ValueError(f"unknown kernel mode {k.mode!r}; use 'sim', 'bullet', 'serial' or 'rpi'")
         self.ctx = Context(clock, self.bus, self.config, self.state, self.devices, self.safety, self.world)
         self.scheduler = Scheduler(clock, self.bus, self.ctx)
         self._build_modules()
@@ -180,7 +189,10 @@ class Runtime:
             mods += [VisionPerception(), SocialModule()]
         if self.devices.has(DeviceKind.MIC) or self.devices.has(DeviceKind.SPEAKER):
             mods.append(VoiceModule())
-        if self.world is not None:
+        if self.bullet is not None:
+            from .hal.bullet.backend import BulletStepper
+            mods.append(BulletStepper(self.bullet))
+        elif self.world is not None:
             mods.append(SimStepper.Module(self.world))
         if self.bridge is not None and hasattr(self.bridge.t, "advance"):
             mods.append(LoopbackStepper(self.bridge.t))
@@ -241,6 +253,8 @@ class Runtime:
         await self.devices.close_all()
         if self.recorder:
             self.recorder.close()
+        if self.bullet is not None:
+            self.bullet.close()
         if self.state.can(SystemState.SHUTDOWN):
             await self.state.transition(SystemState.SHUTDOWN, "runtime shutdown")
         self.safety.audit.record(self.clock.now(), "runtime", "shutdown")

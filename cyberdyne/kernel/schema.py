@@ -27,7 +27,12 @@ SCHEMAS: dict[str, Any] = {
     "perception/scan": [{"angle": "float", "distance": "float"}],
     "perception/front_clearance": "float",
     "perception/obstacles": [{"angle": "float", "distance": "float"}],
-    "perception/people": [{"x": "float", "y": "float", "track_id": "int"}],
+    "perception/people": [{"x": "float", "y": "float", "track_id": "int", "px": "float?", "py": "float?"}],
+    "sensor/odometry_raw": {"x": "float", "y": "float", "theta": "float", "linear": "float", "angular": "float"},
+    "sensor/pose_cov": "float",
+    "world/scene": {"room": "any", "relations": "any", "summary": "str"},
+    "world/anomaly": {"id": "str", "kind": "str", "detail": "str"},
+    "language/affect": {"speaker": "any", "mood": "float", "words": "any"},
     "motion/cmd": {"linear": "float", "angular": "float"},
     "motion/cmd_applied": {"linear": "float", "angular": "float"},
     "nav/goal": {"x": "float", "y": "float", "name": "str?"},
@@ -48,6 +53,7 @@ SCHEMAS: dict[str, Any] = {
     "speech/said": {"text": "str", "voice": "str"},
     "world/observe": {"id": "str", "kind": "str", "x": "float", "y": "float", "attrs": "any"},
     "sim/hear": {"text": "str", "signature": "str?", "loudness": "float?"},
+    "nav/face": {"bearing": "float"},
     "fleet/peers": [{"robot": "str", "last_seen": "float", "state": "any", "pose": "any", "battery": "any"}],
 }
 

@@ -2,7 +2,8 @@
 
     perception/detections  [{kind,label,bearing,distance,confidence,signature}]
     perception/tracks      [{track_id,kind,x,y,confidence,signature,age,last_seen}]
-    perception/people      [{x,y,track_id}]   (for social navigation)
+    perception/people      [{x,y,track_id,vx,vy,px,py}]   with predicted position ``horizon`` s ahead
+    perception/predictions [{track_id,kind,x,y,px,py,vx,vy,horizon}]
 
 The tracker is nearest-neighbour association in world coordinates with a
 gating radius; tracks that are not seen for ``track_ttl`` seconds expire.
@@ -28,7 +29,16 @@ class Track:
     first_seen: float = 0.0
     last_seen: float = 0.0
     hits: int = 1
-    history: list[tuple[float, float]] = field(default_factory=list)
+    history: list[tuple[float, float, float]] = field(default_factory=list)
+
+    def velocity(self) -> tuple[float, float]:
+        """Constant-velocity estimate from the last few smoothed positions."""
+        h = self.history
+        if len(h) < 4:
+            return 0.0, 0.0
+        (x0, y0, t0), (x1, y1, t1) = h[-4], h[-1]
+        dt = t1 - t0
+        return ((x1 - x0) / dt, (y1 - y0) / dt) if dt > 1e-6 else (0.0, 0.0)
 
     def to_dict(self) -> dict:
         return {"track_id": self.track_id, "kind": self.kind, "x": round(self.x, 2), "y": round(self.y, 2),
@@ -69,7 +79,7 @@ class EntityTracker:
                 t.confidence = max(t.confidence * 0.7, d.confidence)
                 t.signature = t.signature or d.signature
                 t.last_seen, t.hits = now, t.hits + 1
-            t.history.append((t.x, t.y))
+            t.history.append((t.x, t.y, now))
             if len(t.history) > 50:
                 t.history.pop(0)
         for tid in list(self.tracks):
@@ -99,5 +109,13 @@ class VisionPerception(Module):
         bus = self.ctx.bus
         await bus.publish("perception/detections", [d.to_dict() for d in frame.detections], source=self.name)
         await bus.publish("perception/tracks", [t.to_dict() for t in tracks], source=self.name)
-        await bus.publish("perception/people", [{"x": t.x, "y": t.y, "track_id": t.track_id}
-                                                for t in tracks if t.kind == "person"], source=self.name)
+        h = self.ctx.config.perception.predict_horizon
+        preds = []
+        for t in tracks:
+            vx, vy = t.velocity()
+            preds.append({"track_id": t.track_id, "kind": t.kind, "x": t.x, "y": t.y, "vx": round(vx, 3),
+                          "vy": round(vy, 3), "px": t.x + vx * h, "py": t.y + vy * h, "horizon": h})
+        await bus.publish("perception/predictions", preds, source=self.name)
+        await bus.publish("perception/people", [{"x": p["x"], "y": p["y"], "track_id": p["track_id"], "vx": p["vx"],
+                                                 "vy": p["vy"], "px": p["px"], "py": p["py"]}
+                                                for p in preds if p["kind"] == "person"], source=self.name)

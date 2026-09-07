@@ -46,8 +46,17 @@ class WorldConfig:
     battery_drain_idle: float = 0.0005     # per second
     battery_drain_moving: float = 0.004    # per second at full speed
     battery_charge_rate: float = 0.05      # per second
+    odometry_noise: float = 0.0            # per-metre drift of the virtual wheel odometry (0 = perfect)
+    imu_noise: float = 0.0                 # heading noise (rad) of the virtual IMU
     rooms: list[dict[str, Any]] = field(default_factory=list)      # {name,x,y,w,h}
     actors: list[dict[str, Any]] = field(default_factory=list)     # {id,kind,x,y,signature,route,speed,active_from}
+
+
+@dataclass
+class PerceptionConfig:
+    fuse_pose: bool = True                 # EKF over odometry + IMU + wall landmarks
+    predict_horizon: float = 1.5           # seconds ahead for people's motion prediction
+    anomaly_displacement: float = 1.5      # metres an object must move from its usual spot to be flagged
 
 
 @dataclass
@@ -116,6 +125,7 @@ class RobotConfig:
     world: WorldConfig = field(default_factory=WorldConfig)
     brain: BrainConfig = field(default_factory=BrainConfig)
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
+    perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     social: SocialConfig = field(default_factory=SocialConfig)
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
     home: HomeConfig = field(default_factory=HomeConfig)
@@ -138,6 +148,7 @@ class RobotConfig:
             world=WorldConfig(**d.get("world", {})),
             brain=BrainConfig(**d.get("brain", {})),
             dashboard=DashboardConfig(**d.get("dashboard", {})),
+            perception=PerceptionConfig(**d.get("perception", {})),
             social=SocialConfig(**d.get("social", {})),
             hardware=HardwareConfig(**d.get("hardware", {})),
             home=HomeConfig(**d.get("home", {})),

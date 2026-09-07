@@ -150,6 +150,7 @@ class Utterance:
     ts: float
     signature: str = ""       # speaker embedding stand-in
     loudness: float = 1.0
+    bearing: float | None = None   # radians in the robot frame, from sound-source localisation
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()

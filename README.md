@@ -56,6 +56,8 @@ cyberdyne check                       # boot, self-test, 1 s of sim, JSON report
 cyberdyne scenario list               # patrol, estop_drill, voice, sensor_fault, council, home, chores
 cyberdyne train -s patrol -n 6        # tune the local controller in sim; prints [motion] values
 cyberdyne verify                      # exhaustive safety-gate + state-machine check
+cyberdyne bench --seconds 120         # every scenario headless -> metrics table
+cyberdyne skill new wave              # scaffold skills_ext/wave.py + a test using cyberdyne.testing
 cyberdyne fleet -s home -n 3 --auction 9,1   # three robots, one auction
 cyberdyne replay run.jsonl --at 12.5  # what did the robot know at t=12.5 (kernel.record = "run.jsonl")
 cyberdyne run -s patrol -t 300        # 300 sim-seconds as fast as possible
@@ -220,6 +222,14 @@ at = 5.0
 topic = "language/utterance"
 payload = { text = "jao 2 7" }
 ```
+
+## Physics and noise
+
+`[kernel] mode = "bullet"` runs the same robot on PyBullet (`pip install
+pybullet numpy`). `[world] odometry_noise = 0.05` makes the virtual wheels
+slip; the EKF in the sensor hub fuses odometry, IMU heading and wall
+landmarks so navigation still works (about 0.2 m error instead of 0.7 m
+after two minutes of patrol).
 
 ## Real hardware
 
