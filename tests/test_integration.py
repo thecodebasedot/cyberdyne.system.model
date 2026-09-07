@@ -103,7 +103,7 @@ def test_voice_commands_drive_the_robot():
         arrived = []
         rt.bus.subscribe("nav/arrived", lambda m: arrived.append(m.payload["name"]))
         await rt.run(50)
-        assert arrived == ["user", "charger"]
+        assert [a for a in arrived if a != "frontier"] == ["user", "charger"]   # idle robot explores in between
         assert rt.ctx.extras["memory"].working.get("owner") == "ijtihad"
         assert rt.scheduler.get("language").understood == 4
         await rt.shutdown()
