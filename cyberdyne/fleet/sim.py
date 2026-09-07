@@ -45,8 +45,8 @@ class FleetSim:
 
     def report(self) -> dict:
         return {rt.config.name: {**{k: rt.report()[k] for k in ("state", "battery", "pose", "tasks")},
-                                 "fleet": rt.ctx.extras["fleet"].describe(),
-                                 "auction": rt.ctx.extras["auction"].describe()} for rt in self.robots}
+                                 "fleet": rt.ctx.extras["fleet"].status(),
+                                 "auction": rt.ctx.extras["auction"].status()} for rt in self.robots}
 
     def get(self, name: str) -> Runtime:
         return next(rt for rt in self.robots if rt.config.name == name)

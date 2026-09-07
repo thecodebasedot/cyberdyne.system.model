@@ -100,5 +100,5 @@ class RoutineModule(Module):
             if self._due(r, now):
                 await self._fire(r, now)
 
-    def describe(self) -> list[dict]:
+    def status(self) -> list[dict]:
         return [r.to_dict() for r in self.routines]

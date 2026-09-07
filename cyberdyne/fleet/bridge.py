@@ -102,5 +102,5 @@ class FleetBridge(Module):
                                            "pose": p.get("pose"), "battery": p.get("battery")}
                                           for p in self.peers.values()], source=self.name)
 
-    def describe(self) -> dict:
+    def status(self) -> dict:
         return {"robot": self.robot, "peers": sorted(self.peers), "sent": self.sent, "received": self.received}

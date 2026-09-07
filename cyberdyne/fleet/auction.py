@@ -154,6 +154,6 @@ class AuctionModule(Module):
             if offer.awarded is None and self.ctx.now >= offer.deadline:
                 await self._close(offer)
 
-    def describe(self) -> dict:
+    def status(self) -> dict:
         return {"robot": self.robot, "won": self.won, "lost": self.lost,
                 "open": [o.to_dict() for o in self.open.values() if o.awarded is None]}

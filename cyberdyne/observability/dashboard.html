@@ -101,7 +101,7 @@ async function poll(){try{S=await (await fetch('/api/state')).json();
   critique:d.critique.join('; ')||'none',prediction:d.rollout?`feasible=${d.rollout.feasible} t=${d.rollout.total_time}s d=${d.rollout.total_distance}m batt=${(d.rollout.battery_after*100).toFixed(0)}%`:'-',
   llm:S.llm?`${S.llm.backend} ${S.llm.model||''} calls=${S.llm.calls||0}`:'rule-based'}:{status:'no deliberation yet'});
  const m=$('mods');m.innerHTML='';if(S.scheduler)for(const x of S.scheduler.modules){const tr=m.insertRow();tr.insertCell().textContent=x.name;
-  const c=tr.insertCell();c.textContent=`${x.state} ${x.rate_hz}Hz ticks=${x.stats.ticks} faults=${x.stats.faults} restarts=${x.stats.restarts} miss=${x.stats.deadline_misses}`;c.style.color=x.state==='fault'?'#ff3b3b':''}
+  const c=tr.insertCell();const st=x.stats||{};c.textContent=`${x.state} ${x.rate_hz}Hz ticks=${st.ticks} faults=${st.faults} restarts=${st.restarts} miss=${st.deadline_misses}`;c.style.color=x.state==='fault'?'#ff3b3b':''}
  $('events').innerHTML=S.recent.slice().reverse().map(r=>`<div><span style="color:var(--dim)">${r.ts.toFixed(2)}</span> <b>${r.topic}</b> ${JSON.stringify(r.payload)}</div>`).join('');
  $('audit').innerHTML=S.audit_tail.slice().reverse().map(a=>`<div><span style="color:var(--dim)">${a.ts.toFixed(2)}</span> ${a.actor}:${a.action} ${JSON.stringify(a.detail)} <span style="color:#334">${a.hash.slice(0,10)}</span></div>`).join('');
  draw()}catch(err){console.error(err)}}

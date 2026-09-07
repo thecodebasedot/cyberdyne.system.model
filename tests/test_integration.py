@@ -3,6 +3,7 @@ import json
 import urllib.request
 
 from cyberdyne.kernel.state import SystemState
+from cyberdyne.runtime import Runtime
 from cyberdyne.sim.scenario import load_scenario
 from tests.conftest import booted, run
 
@@ -128,3 +129,14 @@ def test_dashboard_http_api(config):
         assert rt.safety.estop.engaged
         await rt.shutdown()
     run(go())
+
+
+def test_every_module_keeps_the_base_describe_contract():
+    """Module.describe() feeds the dashboard's module table; subclasses must not override it."""
+    from cyberdyne.kernel.module import Module
+    from cyberdyne.sim.scenario import load_scenario
+    rt = Runtime(load_scenario("chores"))
+    for m in rt.scheduler.modules:
+        assert type(m).describe is Module.describe, f"{m.name} overrides describe()"
+        d = m.describe()
+        assert {"name", "state", "rate_hz", "stats"} <= set(d) and "ticks" in d["stats"]
