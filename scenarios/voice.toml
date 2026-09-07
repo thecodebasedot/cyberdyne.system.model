@@ -1,0 +1,26 @@
+# Commands arrive as text utterances (English + romanised Bangla).
+name = "cyberdyne-voice"
+
+[world]
+robot_start = { x = 2.0, y = 2.0, theta = 0.0 }
+obstacles = [ { x = 4.5, y = 1.0, w = 1.0, h = 3.0, name = "wall" } ]
+
+[[events]]
+at = 0.5
+topic = "language/utterance"
+payload = { text = "status" }
+
+[[events]]
+at = 1.0
+topic = "language/utterance"
+payload = { text = "go to 8 2" }
+
+[[events]]
+at = 25.0
+topic = "language/utterance"
+payload = { text = "charge koro" }
+
+[[events]]
+at = 26.0
+topic = "language/utterance"
+payload = { text = "mone rakho owner = ijtihad" }

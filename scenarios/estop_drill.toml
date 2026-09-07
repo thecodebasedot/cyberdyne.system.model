@@ -1,0 +1,20 @@
+# The robot patrols; at t=8 a scripted e-stop fires, at t=14 an operator
+# resets it with confirmation. Used to verify the safety gate + state machine.
+name = "cyberdyne-drill"
+
+[world]
+robot_start = { x = 1.0, y = 1.0, theta = 0.0 }
+battery_start = 1.0
+
+[brain]
+patrol = [ { x = 8.0, y = 1.0 }, { x = 8.0, y = 8.0 } ]
+
+[[events]]
+at = 8.0
+topic = "safety/estop"
+payload = { engage = true, reason = "scripted drill" }
+
+[[events]]
+at = 14.0
+topic = "safety/estop"
+payload = { engage = false, confirmed = true }

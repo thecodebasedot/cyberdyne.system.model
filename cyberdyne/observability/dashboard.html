@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Cyberdyne Control Room</title>
+<style>
+ :root{--bg:#0b0f14;--panel:#121a23;--line:#1f2b38;--fg:#d7e1ea;--dim:#7d8c9b;--red:#ff3b3b;--amber:#ffb020;--green:#37d67a;--cyan:#38bdf8}
+ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+ header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+ header h1{font-size:15px;margin:0;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan)}
+ .badge{padding:2px 8px;border:1px solid var(--line);border-radius:3px;color:var(--dim)}
+ .badge.estop{border-color:var(--red);color:var(--red);font-weight:700}
+ main{display:grid;grid-template-columns:minmax(360px,1.2fr) 1fr;gap:12px;padding:12px}
+ section{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px;min-width:0}
+ h2{font-size:11px;margin:0 0 8px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase}
+ canvas{width:100%;background:#070a0e;border:1px solid var(--line)}
+ table{width:100%;border-collapse:collapse}td{padding:2px 4px;vertical-align:top}td:first-child{color:var(--dim);width:38%}
+ .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+ button,input{background:#0e141b;color:var(--fg);border:1px solid var(--line);padding:6px 10px;border-radius:3px;font:inherit}
+ button.danger{border-color:var(--red);color:var(--red)}button.ok{border-color:var(--green);color:var(--green)}
+ input{flex:1;min-width:180px}
+ .log{max-height:220px;overflow:auto;font-size:12px}.log div{border-bottom:1px dashed var(--line);padding:2px 0}
+ .meter{height:8px;background:#0e141b;border:1px solid var(--line)}.meter i{display:block;height:100%;background:var(--green)}
+ .stack{display:grid;gap:12px}
+</style></head><body>
+<header><h1>Cyberdyne // Control Room</h1><span class="badge" id="name">-</span><span class="badge" id="state">-</span>
+<span class="badge" id="estop">E-STOP: -</span><span class="badge" id="t">t=0</span></header>
+<main>
+ <div class="stack">
+  <section><h2>World</h2><canvas id="c" width="800" height="800"></canvas>
+   <div class="row"><button class="danger" onclick="post('/api/estop',{engage:true})">E-STOP</button>
+   <button class="ok" onclick="post('/api/estop',{engage:false})">RESET</button>
+   <input id="say" placeholder='say something: "go to 6 7", "charge", "status", "stop"' onkeydown="if(event.key==='Enter')say()">
+   <button onclick="say()">SEND</button></div>
+   <div class="row" style="color:var(--dim)">click the map to set a goal</div></section>
+  <section><h2>Brain</h2><table id="brain"></table></section>
+ </div>
+ <div class="stack">
+  <section><h2>Robot</h2><table id="robot"></table><div class="meter"><i id="batt" style="width:0"></i></div></section>
+  <section><h2>Modules</h2><table id="mods"></table></section>
+  <section><h2>Events</h2><div class="log" id="events"></div></section>
+  <section><h2>Audit (hash-chained)</h2><div class="log" id="audit"></div></section>
+ </div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const cv=$('c'),cx=cv.getContext('2d');let S=null;
+async function post(p,b){await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})}
+function say(){const v=$('say').value.trim();if(!v)return;post('/api/say',{text:v});$('say').value=''}
+cv.addEventListener('click',e=>{if(!S||!S.world)return;const r=cv.getBoundingClientRect();const w=S.world;
+ const x=(e.clientX-r.left)/r.width*w.width,y=(1-(e.clientY-r.top)/r.height)*w.height;post('/api/goal',{x:+x.toFixed(2),y:+y.toFixed(2)})});
+function kv(id,obj){const t=$(id);t.innerHTML='';for(const k in obj){const tr=t.insertRow();tr.insertCell().textContent=k;
+ const v=obj[k];tr.insertCell().textContent=typeof v==='object'?JSON.stringify(v):String(v)}}
+function draw(){if(!S||!S.world)return;const w=S.world,sx=cv.width/w.width,sy=cv.height/w.height,Y=y=>cv.height-y*sy;
+ cx.fillStyle='#070a0e';cx.fillRect(0,0,cv.width,cv.height);
+ cx.strokeStyle='#131c26';for(let i=0;i<=w.width;i++){cx.beginPath();cx.moveTo(i*sx,0);cx.lineTo(i*sx,cv.height);cx.stroke()}
+ for(let j=0;j<=w.height;j++){cx.beginPath();cx.moveTo(0,Y(j));cx.lineTo(cv.width,Y(j));cx.stroke()}
+ if(S.world_model){cx.fillStyle='rgba(255,176,32,.25)';const g=S.world_model.grid;for(const [c,r] of g.occupied)cx.fillRect(c*g.res*sx,Y((r+1)*g.res),g.res*sx,g.res*sy)}
+ for(const z of (S.safety.keep_out||[])){cx.fillStyle='rgba(255,59,59,.15)';cx.strokeStyle='#ff3b3b';cx.fillRect(z.x*sx,Y(z.y+z.h),z.w*sx,z.h*sy);cx.strokeRect(z.x*sx,Y(z.y+z.h),z.w*sx,z.h*sy)}
+ cx.fillStyle='#233346';for(const o of w.obstacles)cx.fillRect(o.x*sx,Y(o.y+o.h),o.w*sx,o.h*sy);
+ cx.strokeStyle='#37d67a';cx.beginPath();cx.arc(w.charger.x*sx,Y(w.charger.y),w.charger.r*sx,0,7);cx.stroke();
+ if(S.world_model)for(const e of S.world_model.entities){if(e.kind==='waypoint'){cx.fillStyle='#38bdf8';cx.beginPath();cx.arc(e.x*sx,Y(e.y),4,0,7);cx.fill();cx.fillText(e.id,e.x*sx+6,Y(e.y)-4)}}
+ const r=w.robot;if(S.scan){cx.strokeStyle='rgba(56,189,248,.25)';for(const p of S.scan){cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));
+  cx.lineTo((r.x+p.distance*Math.cos(r.theta+p.angle))*sx,Y(r.y+p.distance*Math.sin(r.theta+p.angle)));cx.stroke()}}
+ if(S.path&&S.path.points&&S.brain&&S.brain.goal){cx.strokeStyle='rgba(255,176,32,.6)';cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));for(const [px,py] of S.path.points)cx.lineTo(px*sx,Y(py));cx.stroke()}
+ const g=S.brain&&S.brain.goal;if(g){cx.strokeStyle='#ffb020';cx.setLineDash([4,4]);cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));cx.lineTo(g.x*sx,Y(g.y));cx.stroke();cx.setLineDash([]);
+  cx.strokeRect(g.x*sx-5,Y(g.y)-5,10,10)}
+ cx.fillStyle=S.safety.estop.engaged?'#ff3b3b':'#37d67a';cx.beginPath();cx.arc(r.x*sx,Y(r.y),0.2*sx,0,7);cx.fill();
+ cx.strokeStyle='#fff';cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));cx.lineTo((r.x+0.35*Math.cos(r.theta))*sx,Y(r.y+0.35*Math.sin(r.theta)));cx.stroke()}
+async function poll(){try{S=await (await fetch('/api/state')).json();
+ $('name').textContent=S.name;$('state').textContent=S.state.toUpperCase();$('t').textContent='t='+S.time.toFixed(1)+'s';
+ const e=$('estop');e.textContent='E-STOP: '+(S.safety.estop.engaged?'ENGAGED ('+S.safety.estop.reason+')':'clear');e.className='badge'+(S.safety.estop.engaged?' estop':'');
+ const b=S.battery||{level:0};$('batt').style.width=(b.level*100).toFixed(0)+'%';$('batt').style.background=b.level<.25?'#ff3b3b':b.level<.5?'#ffb020':'#37d67a';
+ kv('robot',{pose:S.pose&&`(${S.pose.x.toFixed(2)}, ${S.pose.y.toFixed(2)}) θ=${S.pose.theta.toFixed(2)}`,battery:b.level!=null?(b.level*100).toFixed(1)+'%'+(b.charging?' charging':''):'-',
+  cmd:S.cmd,front_clearance:S.front_clearance!=null?S.front_clearance.toFixed(2)+' m':'-',collisions:S.world.collisions,distance:S.world.distance.toFixed(2)+' m',
+  explored:S.world_model?S.world_model.grid.explored:'-',bus:S.bus.published+' msgs / '+S.bus.errors+' errors',memory:S.memory});
+ kv('brain',S.brain||{});
+ const m=$('mods');m.innerHTML='';if(S.scheduler)for(const x of S.scheduler.modules){const tr=m.insertRow();tr.insertCell().textContent=x.name;
+  const c=tr.insertCell();c.textContent=`${x.state} ${x.rate_hz}Hz ticks=${x.stats.ticks} faults=${x.stats.faults} restarts=${x.stats.restarts} miss=${x.stats.deadline_misses}`;c.style.color=x.state==='fault'?'#ff3b3b':''}
+ $('events').innerHTML=S.recent.slice().reverse().map(r=>`<div><span style="color:var(--dim)">${r.ts.toFixed(2)}</span> <b>${r.topic}</b> ${JSON.stringify(r.payload)}</div>`).join('');
+ $('audit').innerHTML=S.audit_tail.slice().reverse().map(a=>`<div><span style="color:var(--dim)">${a.ts.toFixed(2)}</span> ${a.actor}:${a.action} ${JSON.stringify(a.detail)} <span style="color:#334">${a.hash.slice(0,10)}</span></div>`).join('');
+ draw()}catch(err){console.error(err)}}
+setInterval(poll,500);poll();
+</script></body></html>
