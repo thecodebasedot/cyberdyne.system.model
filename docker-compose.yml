@@ -1,0 +1,12 @@
+services:
+  robot:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      CYBERDYNE_SCENARIO: home
+      # ANTHROPIC_API_KEY: ...
+    volumes:
+      - ./data:/app/data
+  fleet:
+    build: .
+    command: cyberdyne fleet -s home -n 3 -t 300 --auction 9,1

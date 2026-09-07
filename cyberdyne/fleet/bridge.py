@@ -10,6 +10,7 @@ most recent sighting without any coordination.
 """
 from __future__ import annotations
 
+from ..kernel.clocksync import ClockSync
 from ..kernel.context import Context
 from ..kernel.module import Module
 from .interfaces import FleetMessage, Transport
@@ -35,6 +36,8 @@ class FleetBridge(Module):
         self._outbox: list[FleetMessage] = []
         self._entity_clock: dict[str, float] = {}
         self.sent = self.received = 0
+        self.clock_offset = 0.0                 # test hook: pretend my clock is skewed by this much
+        self.sync = ClockSync()
 
     async def setup(self, ctx: Context) -> None:
         self.ctx = ctx
@@ -61,13 +64,15 @@ class FleetBridge(Module):
         if p["kind"] == "robot":
             return
         self._entity_clock[p["id"]] = msg.ts
-        self._outbox.append(FleetMessage(self.robot, "world/entity", {**p, "observed_at": msg.ts}, msg.ts))
+        self._outbox.append(FleetMessage(self.robot, "world/entity",
+                                         {**p, "observed_at": self.sync.to_fleet(msg.ts + self.clock_offset)}, msg.ts))
 
     async def _apply_entity(self, m: FleetMessage) -> None:
         p = m.payload
-        if self._entity_clock.get(p["id"], -1) >= p["observed_at"]:
+        local_ts = self.sync.from_fleet(p["observed_at"]) - self.clock_offset      # compare in MY clock
+        if self._entity_clock.get(p["id"], -1) >= local_ts:
             return                                   # our own sighting is newer (LWW)
-        self._entity_clock[p["id"]] = p["observed_at"]
+        self._entity_clock[p["id"]] = local_ts
         attrs = dict(p.get("attrs") or {})
         attrs["fleet"] = m.robot
         await self.ctx.bus.publish("world/observe", {"id": p["id"], "kind": p["kind"], "x": p["x"], "y": p["y"],
@@ -79,6 +84,7 @@ class FleetBridge(Module):
             self._last_beat = now
             task = (bus.latest_payload("task/status") or {}).get("task")
             self._outbox.append(FleetMessage(self.robot, "fleet/heartbeat", {
+                "clock": now + self.clock_offset,
                 "state": self.ctx.state.state.value, "pose": bus.latest_payload("sensor/odometry"),
                 "battery": bus.latest_payload("sensor/battery"), "task": task["name"] if task else None,
                 "estop": self.ctx.safety.estop.engaged}, now))
@@ -90,6 +96,8 @@ class FleetBridge(Module):
             self.received += 1
             if m.topic == "fleet/heartbeat":
                 self.peers[m.robot] = {"robot": m.robot, "last_seen": now, **(m.payload or {})}
+                if "clock" in (m.payload or {}):
+                    self.sync.observe(m.robot, m.payload["clock"], now + self.clock_offset)
             elif m.topic == "world/entity":
                 await self._apply_entity(m)
             else:
@@ -103,4 +111,5 @@ class FleetBridge(Module):
                                           for p in self.peers.values()], source=self.name)
 
     def status(self) -> dict:
-        return {"robot": self.robot, "peers": sorted(self.peers), "sent": self.sent, "received": self.received}
+        return {"robot": self.robot, "peers": sorted(self.peers), "sent": self.sent, "received": self.received,
+                "clock": self.sync.status()}

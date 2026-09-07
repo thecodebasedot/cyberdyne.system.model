@@ -20,6 +20,8 @@ from .kernel.bus import MessageBus
 from .kernel.clock import Clock, SimClock, WallClock
 from .kernel.config import RobotConfig
 from .kernel.context import Context
+from .kernel.governor import Governor
+from .kernel.reload import HotReloader
 from .kernel.scheduler import Scheduler
 from .kernel.state import StateMachine, SystemState
 from .kernel.watchdog import Watchdog
@@ -152,6 +154,8 @@ class Runtime:
 
     def _build_modules(self) -> None:
         self.watchdog = Watchdog()
+        self.governor = Governor()
+        self.reloader = HotReloader()
         self.telemetry = Telemetry()
         self.world_model = WorldModel()
         registry = SkillRegistry()
@@ -167,9 +171,10 @@ class Runtime:
         interpreter = LLMInterpreter(self.llm, registry.describe()) if self.llm else None
         self.brain = Brain(planner)
         # SkillRunner registers before Brain so the constitution sees the skill list at setup.
-        mods = [SafetyGate(), self.watchdog, SensorHub(), RangePerception(), self.world_model,
-                MotionController(), SkillRunner(registry), self.tasks, self.brain, LanguageModule(interpreter),
-                RoutineModule(), MemoryModule(), self.user_model, DemoRecorder(), OpsModule(), self.telemetry]
+        mods = [SafetyGate(), self.watchdog, self.governor, self.reloader, SensorHub(), RangePerception(),
+                self.world_model, MotionController(), SkillRunner(registry), self.tasks, self.brain,
+                LanguageModule(interpreter), RoutineModule(), MemoryModule(), self.user_model, DemoRecorder(),
+                OpsModule(), self.telemetry]
         from .hal.interfaces import DeviceKind
         if self.devices.has(DeviceKind.CAMERA):
             mods += [VisionPerception(), SocialModule()]
@@ -187,6 +192,8 @@ class Runtime:
             mods.append(self.dashboard)
         self.scheduler.register(*mods)
         self.watchdog.attach(self.scheduler)
+        self.governor.attach(self.scheduler)
+        self.reloader.attach(self.scheduler)
         self.telemetry.attach(self.scheduler)
         self.ctx.extras["world_model"] = self.world_model
         self.ctx.extras["llm"] = self.llm

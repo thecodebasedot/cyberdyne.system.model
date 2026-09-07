@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 
 from . import __version__
@@ -29,6 +30,8 @@ def _config(args) -> RobotConfig:
         cfg.dashboard.enabled = True
         if args.dashboard:
             cfg.dashboard.port = args.dashboard
+        in_docker = os.path.exists("/.dockerenv")
+        cfg.dashboard.host = getattr(args, "host", None) or ("0.0.0.0" if in_docker else cfg.dashboard.host)
     return cfg
 
 
@@ -60,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="real-time factor (1.0 = wall clock); default: as fast as possible")
         sp.add_argument("--dashboard", "-d", nargs="?", const=0, type=int, metavar="PORT",
                         help="serve the web dashboard (default port 8080)")
+        sp.add_argument("--host", default=None, help="dashboard bind address (default 127.0.0.1; 0.0.0.0 in Docker)")
 
     r = sub.add_parser("run", help="run the robot")
     common(r)
@@ -76,7 +80,18 @@ def main(argv: list[str] | None = None) -> int:
     sc = sub.add_parser("scenario", help="scenario tools")
     sc.add_subparsers(dest="scmd", required=True).add_parser("list")
 
-    sub.add_parser("skills", help="list built-in skills")
+    sk = sub.add_parser("skills", help="list built-in skills")
+    sk.add_subparsers(dest="skcmd").add_parser("list")
+
+    sn = sub.add_parser("skill", help="skill tools")
+    snp = sn.add_subparsers(dest="skillcmd", required=True).add_parser("new", help="scaffold a skill + test")
+    snp.add_argument("name")
+    snp.add_argument("--description", default="a custom skill")
+    snp.add_argument("--root", default=".")
+
+    bn = sub.add_parser("bench", help="run every scenario headless and print a metrics table")
+    bn.add_argument("--seconds", type=float, default=120.0)
+    bn.add_argument("names", nargs="*")
 
     sub.add_parser("verify", help="exhaustively check the safety gate and state machine invariants")
 
@@ -117,6 +132,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{m['name']:<12} {m['permission']:<20} {m['description']}")
         return 0
 
+    if args.cmd == "skill":
+        from pathlib import Path
+
+        from .skills.scaffold import scaffold
+        for path in scaffold(args.name, Path(args.root), args.description):
+            print(path)
+        return 0
+    if args.cmd == "bench":
+        from .bench import main as bench_main
+        return bench_main(args.seconds, args.names or None)
     if args.cmd == "eval-llm":
         from .cognition.eval_llm import main as eval_main
         rep = eval_main(args.backend, args.model, args.effort)

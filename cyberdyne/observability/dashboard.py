@@ -2,6 +2,7 @@
 
     GET  /            HTML
     GET  /api/state   telemetry snapshot (JSON)
+    GET  /metrics     Prometheus text format
     POST /api/say     {"text": "..."}  -> language/utterance
     POST /api/estop   {"engage": bool} -> safety/estop
     POST /api/goal    {"x":..,"y":..}  -> nav/goal
@@ -20,6 +21,43 @@ from ..kernel.context import Context
 from ..kernel.module import Module
 
 _HTML = (Path(__file__).parent / "dashboard.html").read_text(encoding="utf-8")
+
+
+def prometheus_metrics(ctx) -> str:
+    """Prometheus text exposition of the robot's vital signs (scrape /metrics)."""
+    bus = ctx.bus
+    name = ctx.config.name
+    lines = []
+
+    def g(metric: str, value, help_: str, labels: str = "") -> None:
+        lines.append(f"# HELP cyberdyne_{metric} {help_}\n# TYPE cyberdyne_{metric} gauge")
+        lab = f'robot="{name}"' + (f",{labels}" if labels else "")
+        lines.append(f"cyberdyne_{metric}{{{lab}}} {value}")
+    batt = bus.latest_payload("sensor/battery") or {}
+    g("battery_level", batt.get("level", 0.0), "battery state of charge 0..1")
+    g("estop_engaged", int(ctx.safety.estop.engaged), "1 when the e-stop is engaged")
+    g("bus_messages_total", bus.stats.published, "messages published on the bus")
+    g("bus_handler_errors_total", bus.stats.handler_errors, "subscriber exceptions")
+    g("audit_entries", len(ctx.safety.audit), "audit log length")
+    g("sim_time_seconds", ctx.now, "kernel clock")
+    states = {s: 0 for s in ("boot", "diagnostic", "idle", "active", "charging", "estop", "shutdown")}
+    states[ctx.state.state.value] = 1
+    for st, v in states.items():
+        g("state", v, "system state (one-hot)", f'state="{st}"')
+    tel = ctx.extras.get("telemetry")
+    sched = tel._scheduler if tel else None
+    for m in (sched.modules if sched else []):
+        lab = f'module="{m.name}"'
+        g("module_ticks_total", m.stats.ticks, "ticks per module", lab)
+        g("module_faults_total", m.stats.faults, "faults per module", lab)
+        g("module_restarts_total", m.stats.restarts, "restarts per module", lab)
+        g("module_tick_seconds", round(m.stats.last_tick_duration, 6), "last tick duration", lab)
+        g("module_rate_hz", m.rate_hz, "current rate", lab)
+    tasks = ctx.extras.get("tasks")
+    if tasks:
+        g("tasks_completed_total", tasks.completed, "tasks done")
+        g("tasks_failed_total", tasks.failed, "tasks failed")
+    return "\n".join(lines) + "\n"
 
 
 class Dashboard(Module):
@@ -59,6 +97,8 @@ class Dashboard(Module):
                     tel = module.ctx.extras.get("telemetry")
                     snap = tel.snapshot if tel and tel.snapshot else (tel.build() if tel else {})
                     self._send(200, json.dumps(snap, default=str).encode())
+                elif self.path == "/metrics":
+                    self._send(200, prometheus_metrics(module.ctx).encode(), "text/plain; version=0.0.4")
                 else:
                     self._send(404, b'{"error":"not found"}')
 
