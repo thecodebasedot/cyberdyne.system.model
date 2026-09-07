@@ -55,6 +55,9 @@ class Brain(Module):
         self._subs = [ctx.bus.subscribe("nav/arrived", self._on_arrived, name="brain.arrived"),
                       ctx.bus.subscribe("brain/goal", self._on_goal, name="brain.goal"),
                       ctx.bus.subscribe("human/answer", self._on_answer, name="brain.answer"),
+                      ctx.bus.subscribe("task/done", self._on_task_end, name="brain.task_done"),
+                      ctx.bus.subscribe("task/failed", self._on_task_end, name="brain.task_failed"),
+                      ctx.bus.subscribe("task/cancelled", self._on_task_end, name="brain.task_cancelled"),
                       ctx.bus.subscribe("safety/estop_state", self._on_estop, name="brain.estop")]
         skills = ctx.extras.get("skills")
         constitution = Constitution(ctx.config, ctx.safety.permissions,
@@ -67,8 +70,8 @@ class Brain(Module):
                      Action("hold", self._hold)),
             Sequence("charge", Condition("battery low", lambda bb: bb["need_charge"]),
                      Action("go to charger", self._go_charge)),
-            Sequence("plan", Condition("has plan", lambda bb: bb["has_plan"]),
-                     Action("execute plan", self._run_plan)),
+            Sequence("task", Condition("has task", lambda bb: bb["has_task"]),
+                     Action("supervise task", self._supervise)),
             Sequence("patrol", Condition("has patrol", lambda bb: bool(self.patrol)),
                      Action("patrol", self._patrol)),
             Action("idle", self._idle),
@@ -103,6 +106,9 @@ class Brain(Module):
         self.plan, self.plan_idx, self.current_goal, self.pending = d.plan, 0, None, None
         self.ctx.safety.audit.record(self.ctx.now, "brain", "plan.adopt", goal=d.goal, decision=d.id)
         await self.ctx.bus.publish("brain/plan", d.plan.to_dict(), source=self.name)
+        # Execution belongs to the task runner: it owns retries, timeouts, pause/resume.
+        await self.ctx.bus.publish("task/start", {"name": d.goal, "origin": "brain",
+                                                  "steps": [s.__dict__ for s in d.plan.steps]}, source=self.name)
 
     async def _on_answer(self, msg) -> None:
         p = msg.payload or {}
@@ -140,10 +146,16 @@ class Brain(Module):
                                        source=self.name)
             await self._deliberate(str(p.get("answer", "")))
 
+    async def _on_task_end(self, msg) -> None:
+        if msg.topic == "task/done":
+            await self.ctx.bus.publish("brain/plan_done", {"task": msg.payload}, source=self.name)
+        self.plan = None
+
     async def _on_estop(self, msg) -> None:
         if msg.payload["engaged"]:
             self.current_goal = None
             await self.ctx.bus.publish("nav/cancel", None, source=self.name)
+            await self.ctx.bus.publish("task/pause", {"reason": "estop"}, source=self.name)
             if self.ctx.state.can(SystemState.ESTOP):
                 await self.ctx.state.transition(SystemState.ESTOP, msg.payload["reason"])
         elif self.ctx.state.state == SystemState.ESTOP:
@@ -159,7 +171,8 @@ class Brain(Module):
         return {"estop": self.ctx.safety.estop.engaged,
                 "battery": batt,
                 "need_charge": low or topping_up,
-                "has_plan": self.plan is not None and self.plan_idx < len(self.plan.steps),
+                "has_task": bool((bus.latest_payload("task/status") or {}).get("active")),
+                "task": (bus.latest_payload("task/status") or {}).get("task"),
                 "pose": bus.latest_payload("sensor/odometry")}
 
     async def _set_goal(self, x: float, y: float, name: str) -> None:
@@ -181,6 +194,8 @@ class Brain(Module):
         if self.mode != "charging":
             self.mode = "charging"
             self._arrived = False
+            if bb["has_task"]:
+                await self.ctx.bus.publish("task/pause", {"reason": "battery"}, source=self.name)
             await self._set_goal(c["x"], c["y"], "charger")
             await self._set_state(SystemState.ACTIVE, "battery low, heading to charger")
             return Status.RUNNING
@@ -194,30 +209,16 @@ class Brain(Module):
                 await self._set_goal(c["x"], c["y"], "charger")     # missed the pad; retry
         return Status.RUNNING
 
-    async def _run_plan(self, bb: dict) -> Status:
-        step = self.plan.steps[self.plan_idx]
-        if self.mode != "plan":
-            self.mode = "plan"
+    async def _supervise(self, bb: dict) -> Status:
+        """A task is active: keep the system ACTIVE and make sure it is not paused for no reason."""
+        task = bb["task"] or {}
+        if self.mode != "task":
+            self.mode = "task"
             self.current_goal = None
             self._arrived = False
-        if self._arrived:
-            self._arrived = False
-            self.plan_idx += 1
-            self.current_goal = None
-            if self.plan_idx >= len(self.plan.steps):
-                await self.ctx.bus.publish("brain/plan_done", self.plan.to_dict(), source=self.name)
-                self.plan = None
-                self.mode = "idle"
-                return Status.SUCCESS
-            step = self.plan.steps[self.plan_idx]
-        if self.current_goal is None:
-            if step.skill == "goto":
-                await self._set_goal(step.args["x"], step.args["y"], step.args.get("name", "plan"))
-                await self._set_state(SystemState.ACTIVE, f"plan step {self.plan_idx}: {step.skill}")
-            else:
-                await self.ctx.bus.publish("skill/invoke", {"skill": step.skill, "args": step.args},
-                                           source=self.name)
-                self.plan_idx += 1
+        if task.get("status") == "paused" and not bb["need_charge"] and not bb["estop"]:
+            await self.ctx.bus.publish("task/resume", None, source=self.name)
+        await self._set_state(SystemState.ACTIVE, f"task {task.get('name')}")
         return Status.RUNNING
 
     async def _patrol(self, bb: dict) -> Status:

@@ -38,12 +38,16 @@
 - [x] Serial bridge backend (line protocol, `LoopbackTransport` fake firmware, pyserial optional), `mode = "serial"`, drive calibration; docs/HARDWARE.md
 - Follow-ups: real camera (OpenCV + detector), real mic (Whisper/Vosk), TTS, IMU over serial, PyBullet backend, Raspberry Pi GPIO drivers
 
-## Phase 4 — Skills and learning
-- [ ] Skill composition and long-horizon tasks with interrupt/resume
-- [ ] Home automation skills (MQTT / Home Assistant)
-- [ ] Imitation + RL for local control in sim, shielded by the safety gate
-- [ ] User model: preferences, routines, mood
-- [ ] Sandboxed self-authored skills gated by `self.modify` permission
+## Phase 4 — Skills and learning (done)
+- [x] `TaskRunner`: goto / skill / wait / sub-task steps, retries, timeouts, pause/resume, cancel, queue; brain executes plans through it and pauses tasks for battery or e-stop
+- [x] `RoutineModule`: `every` (kernel clock), `at HH:MM` (wall clock), one-shot reminders; `remind` skill
+- [x] Home automation: `DeviceHub` with `VirtualHub`, `MQTTHub` (paho, optional), `HassHub` (REST); `device` skill resolves room from the world model; Bangla phrases ("kitchen er light jalao")
+- [x] Learning from demonstration: `DemoRecorder` + `teach` skill turn human-sent goals and device commands into a replayable task
+- [x] `UserModel`: per-person habits by time of day; proactive *suggestions* (never actions) when a habit is seen enough
+- [x] `ControllerTuner`: (1+1)-ES over local-controller parameters in simulation, scored on laps / distance / contacts / recoveries / collisions; `cyberdyne train`; the safety gate is outside the search space
+- [x] Self-authored **macro** skills (declarative steps + templates, no code), validated by the constitution, gated by `self.modify` (FORBIDDEN by default, CONFIRM when the owner enables it)
+- [x] `Store`: JSON persistence of facts, episodes, user model, taught tasks and macros across runs (`[learning] data_dir`)
+- Follow-ups: mood/affect estimation, RL policy for local control (the tuner is the shielded harness for it), LLM-drafted macros through the same validator
 
 ## Phase 5 — Scale
 - [ ] Fleet transport (ZeroMQ / MQTT), shared world model sync (CRDT), task auction

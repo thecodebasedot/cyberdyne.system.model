@@ -68,6 +68,22 @@ class HardwareConfig:
 
 
 @dataclass
+class HomeConfig:
+    hub: str = "virtual"                # "virtual" | "mqtt" | "hass"
+    url: str = ""                       # mqtt://host:port or http://hass:8123
+    token: str = ""                     # Home Assistant long-lived token (or env HASS_TOKEN)
+    devices: list[dict[str, Any]] = field(default_factory=list)   # {id, kind, room, name?}
+
+
+@dataclass
+class LearningConfig:
+    data_dir: str = ""                  # "" = no persistence
+    user_model: bool = True
+    suggest_after: int = 3              # observations before the robot suggests a habit
+    suggest_cooldown: float = 300.0
+
+
+@dataclass
 class BrainConfig:
     patrol: list[dict[str, float]] = field(default_factory=list)
     battery_low: float = 0.25
@@ -97,6 +113,10 @@ class RobotConfig:
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     social: SocialConfig = field(default_factory=SocialConfig)
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    home: HomeConfig = field(default_factory=HomeConfig)
+    learning: LearningConfig = field(default_factory=LearningConfig)
+    tasks: list[dict[str, Any]] = field(default_factory=list)      # {name, steps:[...]}
+    routines: list[dict[str, Any]] = field(default_factory=list)   # {name, every|at, goal|task, speak?}
     events: list[dict[str, Any]] = field(default_factory=list)   # scripted scenario events
     skills: list[str] = field(default_factory=list)              # extra skill module paths
 
@@ -115,6 +135,10 @@ class RobotConfig:
             dashboard=DashboardConfig(**d.get("dashboard", {})),
             social=SocialConfig(**d.get("social", {})),
             hardware=HardwareConfig(**d.get("hardware", {})),
+            home=HomeConfig(**d.get("home", {})),
+            learning=LearningConfig(**d.get("learning", {})),
+            tasks=list(d.get("tasks", [])),
+            routines=list(d.get("routines", [])),
             events=list(d.get("events", [])),
             skills=list(d.get("skills", [])),
         )

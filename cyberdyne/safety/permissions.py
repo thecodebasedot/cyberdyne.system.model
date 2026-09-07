@@ -79,3 +79,7 @@ class PermissionPolicy:
 
 DEFAULT_RULES["skill.find"] = "free"
 DEFAULT_RULES["skill.arm"] = "confirm"
+DEFAULT_RULES["skill.device"] = "log"
+DEFAULT_RULES["skill.remind"] = "free"
+DEFAULT_RULES["skill.task"] = "log"
+DEFAULT_RULES["skill.teach"] = "log"

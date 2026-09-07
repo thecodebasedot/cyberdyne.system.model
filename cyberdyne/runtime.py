@@ -15,6 +15,7 @@ from .cognition.llm_planner import LLMPlanner
 from .hal.registry import DeviceRegistry
 from .hal.serial import build_serial_devices
 from .hal.virtual import build_virtual_devices
+from .home.hub import build_hub
 from .kernel.bus import MessageBus
 from .kernel.clock import Clock, SimClock, WallClock
 from .kernel.config import RobotConfig
@@ -25,7 +26,10 @@ from .kernel.watchdog import Watchdog
 from .language.llm_interpreter import LLMInterpreter
 from .language.module import LanguageModule
 from .language.voice import VoiceModule
+from .learning.recorder import DemoRecorder
+from .learning.user_model import UserModel, UserModelModule
 from .memory.module import MemoryModule
+from .memory.persist import Store
 from .motion.controller import MotionController
 from .observability.dashboard import Dashboard
 from .observability.telemetry import Telemetry
@@ -35,9 +39,12 @@ from .perception.vision import VisionPerception
 from .safety.core import SafetyCore, SafetyGate
 from .sim.scenario import ScenarioEvents
 from .sim.world import Actor, Obstacle, Pose, World
+from .skills.authoring import MacroSkill
 from .skills.registry import SkillRegistry
 from .skills.runner import SkillRunner
 from .social.module import SocialModule
+from .tasks.routines import RoutineModule
+from .tasks.runner import TaskRunner
 from .world_model.module import WorldModel
 
 log = logging.getLogger("cyberdyne.runtime")
@@ -141,13 +148,20 @@ class Runtime:
         self.world_model = WorldModel()
         registry = SkillRegistry()
         registry.load_builtin()
+        self.store = Store(self.config.learning.data_dir) if self.config.learning.data_dir else None
+        user_model = UserModel.from_dict(self.store.load("user_model", {})) if self.store else UserModel()
+        if self.store:
+            for m in self.store.load("macros", {}).values():
+                registry.register(MacroSkill(m["name"], m["description"], m["steps"], m["params"]))
+        self.user_model = UserModelModule(user_model)
+        self.tasks = TaskRunner()
         planner = LLMPlanner(self.llm, effort=self.config.brain.effort) if self.llm else None
         interpreter = LLMInterpreter(self.llm, registry.describe()) if self.llm else None
         self.brain = Brain(planner)
         # SkillRunner registers before Brain so the constitution sees the skill list at setup.
         mods = [SafetyGate(), self.watchdog, SensorHub(), RangePerception(), self.world_model,
-                MotionController(), SkillRunner(registry), self.brain, LanguageModule(interpreter),
-                MemoryModule(), self.telemetry]
+                MotionController(), SkillRunner(registry), self.tasks, self.brain, LanguageModule(interpreter),
+                RoutineModule(), MemoryModule(), self.user_model, DemoRecorder(), self.telemetry]
         from .hal.interfaces import DeviceKind
         if self.devices.has(DeviceKind.CAMERA):
             mods += [VisionPerception(), SocialModule()]
@@ -168,6 +182,8 @@ class Runtime:
         self.telemetry.attach(self.scheduler)
         self.ctx.extras["world_model"] = self.world_model
         self.ctx.extras["llm"] = self.llm
+        self.ctx.extras["home"] = build_hub(self.config.home)
+        self.ctx.extras["store"] = self.store
 
     async def boot(self) -> dict[str, tuple[bool, str]]:
         self.safety.audit.record(self.clock.now(), "runtime", "boot", robot=self.config.name)
@@ -177,6 +193,13 @@ class Runtime:
         await self.bus.publish("kernel/diagnostic", {k: {"ok": ok, "msg": m} for k, (ok, m) in results.items()},
                                source="runtime")
         await self.scheduler.setup_all()
+        if self.store:
+            from .tasks.model import TaskStep
+            for name, steps in self.store.load("tasks", {}).items():
+                self.tasks.define(name, [TaskStep.from_dict(x) for x in steps])
+            mem = self.ctx.extras.get("memory")
+            for f in self.store.load("facts", []):
+                mem.semantic.add(f["subject"], f["predicate"], f["object"], f.get("source", "store"), f.get("ts", 0.0))
         failed = [k for k, (ok, _) in results.items() if not ok]
         if failed:
             await self.safety.estop.engage(f"self-test failed: {', '.join(failed)}")
@@ -192,6 +215,8 @@ class Runtime:
         return await self.scheduler.run(duration)
 
     async def shutdown(self) -> None:
+        if self.store and "memory" in self.ctx.extras:
+            self.store.snapshot(self.ctx.extras["memory"], self.user_model.model, self.tasks.describe_library())
         await self.scheduler.teardown_all()
         await self.devices.close_all()
         if self.state.can(SystemState.SHUTDOWN):
@@ -211,6 +236,8 @@ class Runtime:
                 "brain": self.bus.latest_payload("brain/state"),
                 "world": self.world.to_dict() if self.world else None,
                 "room": self.world_model.current_room,
+                "tasks": {"completed": self.tasks.completed, "failed": self.tasks.failed,
+                          "library": sorted(self.tasks.library)},
                 "estop": self.safety.describe()["estop"],
                 "audit": {"entries": len(self.safety.audit), "chain_ok": ok, "first_bad": bad},
                 "bus": {"published": self.bus.stats.published, "errors": self.bus.stats.handler_errors},

@@ -115,6 +115,43 @@ FORBIDDEN in the permission policy).
   factors. `mode = "serial"` in `[kernel]` swaps the whole HAL. See
   `docs/HARDWARE.md`.
 
+## Skills and learning (Phase 4)
+
+* **Tasks** (`tasks/`): a `Task` is a list of `TaskStep`s (`goto`, `skill`,
+  `wait`, `task` = spliced sub-task). `TaskRunner` executes one task at a
+  time with per-step timeouts and retries, and supports pause (cancels the
+  navigation goal, keeps the index), resume, cancel, queueing and
+  supersede. Approved council decisions become tasks; the brain's
+  behaviour tree only *supervises* (`has task` branch) and pre-empts:
+  low battery or e-stop pauses the task, a full battery resumes it.
+* **Routines** (`tasks/routines.py`): `every` seconds on the kernel clock,
+  `at HH:MM` daily on the wall clock, one-shot reminders. A routine
+  starts a library task, sends a goal to the council, or just speaks.
+* **Home** (`home/`): `DeviceHub` (virtual / MQTT / Home Assistant) with
+  room-aware lookup. The `device` skill defaults to the room the robot is
+  in, so "light jalao" works without naming a room.
+* **Learning** (`learning/`):
+  * `DemoRecorder` records human-sent goals and device commands while
+    `teach <name>` is active and turns them into a library task
+    (learning from demonstration).
+  * `UserModel` counts (person, time bucket, request) and, once a habit
+    crosses `suggest_after`, the robot asks "shall I?" through
+    `brain/suggestion` + speech. Suggesting is the ceiling: habits never
+    become actions on their own.
+  * `ControllerTuner` runs headless simulated episodes and hill-climbs the
+    local controller's parameters within bounds. The safety gate is not a
+    parameter and still clamps every command the tuned controller emits:
+    learning is *shielded* by construction.
+* **Self-authored skills** (`skills/authoring.py`): the only form of
+  self-modification is a **macro**: named, parameterised, declarative
+  steps over existing skills. No generated code runs. Every macro passes
+  `validate_macro` (identifier rules, known skills, constitution review)
+  and creating one is the `self.modify` action: FORBIDDEN unless the owner
+  sets it to CONFIRM in `[safety.permissions]`.
+* **Persistence** (`memory/persist.py`): with `[learning] data_dir` set,
+  facts, episodes, the user model, taught tasks and macros are written as
+  JSON at shutdown and loaded at boot.
+
 ## Perception → World model → Memory
 
 * `SensorHub` publishes `sensor/odometry|battery|imu`.
@@ -261,7 +298,13 @@ module health, events, audit chain. Commands go back through the bus
 | `brain/decision` | Brain (council) | `Decision.to_dict()` |
 | `brain/question`, `brain/question_closed` | Brain | `{id, question, options, goal}` / `{id, outcome}` |
 | `human/answer` | dashboard / `answer` skill | `{answer, id?}` |
-| `brain/plan`, `brain/plan_done`, `brain/state`, `brain/lap` | Brain | |
+| `brain/plan`, `brain/plan_done`, `brain/state`, `brain/lap`, `brain/suggestion` | Brain / UserModel | |
+| `task/start`, `task/pause`, `task/resume`, `task/cancel` | brain, skills, routines | `{name, steps?, origin?, queue?}` |
+| `task/started`, `task/step`, `task/retry`, `task/paused`, `task/resumed`, `task/done`, `task/failed`, `task/cancelled`, `task/status` | TaskRunner | `Task.to_dict()` |
+| `routine/fired` | RoutineModule | `Routine.to_dict()` |
+| `home/device` | `device` skill | `SmartDevice.to_dict()` |
+| `recorder/status` | DemoRecorder | `{recording, steps}` |
+| `skill/defined` | `define_skill` | macro spec |
 | `nav/goal`, `nav/cancel` | Brain | `{x, y, name}` |
 | `nav/path`, `nav/status`, `nav/arrived`, `nav/recovery` | MotionController | |
 | `motion/cmd` | MotionController | `{linear, angular}` requested |
@@ -284,7 +327,9 @@ module health, events, audit chain. Commands go back through the bus
 | Global workspace / metacognition (C) | `cognition/council.py` | brief -> plan -> critique -> question loop |
 | Constitutional rules over LLM output (F) | `cognition/constitution.py` | deterministic review, hard vs overridable |
 | Mental simulation (C) | `cognition/simulate.py` | belief-only imagined world |
-| Self-modification (E) | `learning/`, `skills/` | `Learner.propose`, `self.modify` FORBIDDEN gate |
+| Self-modification (E) | `skills/authoring.py` | declarative macros only, constitution-validated, `self.modify` gate |
+| Learning (D, C) | `learning/` | demonstration recorder, user model, shielded tuner |
+| Long-horizon tasks, routines (9) | `tasks/`, `home/` | TaskRunner pause/resume, routines, device hub |
 | Runtime verification, shielded RL (F) | `safety/` | `SafetyGate` as sole actuator writer |
 | Robot society / fleet economy (G) | `fleet/` | `FleetMessage`, `Transport` |
 | Deep human modelling (H) | `social/`, `world_model/entities.py`, `memory/` | `IdentityRegistry`, trust, `EntityStore` with rooms |

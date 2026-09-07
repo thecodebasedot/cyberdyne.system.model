@@ -37,6 +37,7 @@
    <button onclick="answer()">SEND</button></div></section>
   <section><h2>Council</h2><table id="council"></table></section>
   <section><h2>Social</h2><table id="social"></table></section>
+  <section><h2>Tasks &amp; Home</h2><table id="tasks"></table></section>
  </div>
  <div class="stack">
   <section><h2>Robot</h2><table id="robot"></table><div class="meter"><i id="batt" style="width:0"></i></div></section>
@@ -82,6 +83,11 @@ async function poll(){try{S=await (await fetch('/api/state')).json();
   cmd:S.cmd,front_clearance:S.front_clearance!=null?S.front_clearance.toFixed(2)+' m':'-',collisions:S.world.collisions,distance:S.world.distance.toFixed(2)+' m',
   explored:S.world_model?S.world_model.grid.explored:'-',bus:S.bus.published+' msgs / '+S.bus.errors+' errors',memory:S.memory});
  kv('brain',S.brain||{});
+ const tk=S.task&&S.task.task;kv('tasks',{task:tk?`${tk.name} [${tk.status}] step ${tk.step+1}/${tk.steps}${tk.error?' '+tk.error:''}`:'idle',
+  done:S.task?S.task.completed:0,failed:S.task?S.task.failed:0,history:(S.task_history||[]).map(t=>t.name+':'+t.status).join(', '),
+  routines:(S.routines||[]).map(r=>r.name+(r.every?' every '+r.every+'s':'')+(r.at?' at '+r.at:'')+' x'+r.fired).join(', ')||'none',
+  devices:(S.devices||[]).map(d=>`${d.room} ${d.kind}=${d.state.on?'ON':'off'}`).join(', ')||'none',
+  recording:S.recorder?S.recorder.recording+' ('+S.recorder.steps+' steps)':'-',suggestion:S.suggestion?S.suggestion.person+': '+S.suggestion.request:'-'});
  kv('social',{room:S.room?S.room.name:'-',tracks:(S.tracks||[]).map(t=>t.kind+'#'+t.track_id+(t.signature?'':' (unknown)')).join(', ')||'none',
   said:(S.speech||[]).map(x=>'"'+x.text+'"').join(' '),alerts:(S.alerts||[]).length});
  $('qbox').hidden=!S.question;if(S.question)$('question').textContent=S.question.question+'  ['+S.question.options.join(' / ')+']';

@@ -78,6 +78,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("skills", help="list built-in skills")
 
+    tr = sub.add_parser("train", help="tune the local controller in simulation (shielded by the safety gate)")
+    tr.add_argument("--scenario", "-s", default="patrol")
+    tr.add_argument("--episodes", "-n", type=int, default=6)
+    tr.add_argument("--seconds", type=float, default=90.0, help="sim seconds per episode")
+
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -91,6 +96,16 @@ def main(argv: list[str] | None = None) -> int:
         reg.load_builtin()
         for m in reg.describe():
             print(f"{m['name']:<12} {m['permission']:<20} {m['description']}")
+        return 0
+
+    if args.cmd == "train":
+        from .learning.tuner import ControllerTuner
+        cfg = load_scenario(args.scenario)
+        cfg.dashboard.enabled = False
+        res = asyncio.run(ControllerTuner(cfg, args.seconds).tune(args.episodes))
+        print(json.dumps({"result": res.to_dict(), "history": res.history}, indent=2))
+        print("\n# put into your scenario:\n[motion]\n" + "\n".join(f"{k} = {v}" for k, v in res.best.items()),
+              file=sys.stderr)
         return 0
 
     cfg = _config(args)

@@ -23,8 +23,15 @@ ask; wake-word voice control that talks back; rooms and "where are my keys";
 social navigation that gives people space; and a serial bridge to a real
 microcontroller with a fake firmware for tests and a calibration routine.
 
-Every later layer of the design (learning, fleets, formal verification)
-plugs into contracts that already exist.
+Phase 4 makes it useful and lets it learn: long-horizon tasks with retries,
+pause and resume; timed routines and reminders; smart-home devices by room;
+routes taught by demonstration; a user model that suggests habits; a
+simulation-based tuner for the local controller that the safety gate still
+shields; self-authored macro skills (declarative, constitution-checked,
+owner-gated); and everything learned persisted across runs.
+
+Every later layer of the design (fleets, formal verification) plugs into
+contracts that already exist.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -40,7 +47,8 @@ Python 3.11+, no runtime dependencies.
 pip install -e ".[dev]"
 
 cyberdyne check                       # boot, self-test, 1 s of sim, JSON report
-cyberdyne scenario list               # patrol, estop_drill, voice, sensor_fault, council, home
+cyberdyne scenario list               # patrol, estop_drill, voice, sensor_fault, council, home, chores
+cyberdyne train -s patrol -n 6        # tune the local controller in sim; prints [motion] values
 cyberdyne run -s patrol -t 300        # 300 sim-seconds as fast as possible
 cyberdyne run -s patrol -d            # real-time with the dashboard on http://127.0.0.1:8080
 cyberdyne say "go to 8 2"             # one-shot command, 20 s run, report
@@ -106,6 +114,10 @@ E-STOP / RESET.
   and answers "amar keys kothay".
 * Listens for its wake word, knows who is talking, and refuses requests the
   speaker's trust level does not allow.
+* Runs long tasks ("rounds": go to the kitchen, lights on, wait, living
+  room, lights off) with retries and timeouts, pauses them to charge and
+  resumes; fires routines and reminders; learns a route you demonstrate
+  and replays it; suggests what you usually ask for at this hour.
 * Deliberates on free-form goals: refuses goals into keep-out zones or
   obstacles outright, asks before confirm-tier actions or when its own
   prediction is shaky, accepts `proceed` / `cancel` / a new goal, and can
@@ -124,11 +136,13 @@ cyberdyne/
   memory/         working + episodic (vector search) + semantic (knowledge graph)
   cognition/      behaviour tree, planner, brain, council, constitution, mental simulation, LLM seam
   motion/         A* grid planner, local controller
-  skills/         manifests, registry, runner, builtin/
+  skills/         manifests, registry, runner, builtin/ (core, home), macro authoring
   language/       rule interpreter, LLM interpreter, language module, voice module
   social/         identity registry (trust), social module
   observability/  telemetry, dashboard (+ dashboard.html)
-  learning/       reserved (Phase 4)
+  learning/       user model, demonstration recorder, controller tuner
+  tasks/          task model, task runner, routines
+  home/           smart-home device hub (virtual / MQTT / Home Assistant)
   fleet/          reserved (Phase 5)
   runtime.py      wires everything from a RobotConfig
   cli.py
@@ -154,6 +168,30 @@ Add the module path to the scenario (`skills = ["mypkg.skills"]`). The
 permission tier defaults to `skill.wave → LOG`; override it under
 `[safety.permissions]`.
 
+## Tasks, routines and devices in a scenario
+
+```toml
+[home]
+devices = [ { id = "kitchen_light", kind = "light", room = "kitchen" } ]
+
+[[tasks]]
+name = "rounds"
+steps = [ { kind = "goto", args = { x = 8, y = 1.5, name = "kitchen" } },
+          { kind = "skill", args = { skill = "device", args = { kind = "light", room = "kitchen", on = true } } },
+          { kind = "wait", args = { seconds = 2 } } ]
+
+[[routines]]
+name = "hourly rounds"
+every = 3600
+task = "rounds"
+
+[learning]
+data_dir = "~/.cyberdyne"        # persist facts, habits, taught routes, macros
+```
+
+Say `start task rounds`, `remind me in 30 seconds to check the oven`,
+`teach corner_run` ... `done teaching`, `kitchen er light jalao`.
+
 ## Writing a scenario
 
 ```toml
@@ -177,7 +215,7 @@ firmware in-process. See [docs/HARDWARE.md](docs/HARDWARE.md).
 ## Development
 
 ```bash
-pytest          # 41 tests, ~8 s
+pytest          # 51 tests, ~25 s
 ruff check .
 ```
 
