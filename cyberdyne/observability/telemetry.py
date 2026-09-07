@@ -1,11 +1,13 @@
 """Telemetry: one place that can describe the whole robot as JSON."""
 from __future__ import annotations
 
+from collections import deque
+
 from ..kernel.context import Context
 from ..kernel.module import Module
 
 _NOISY = ("sensor/", "perception/", "motion/", "nav/status", "nav/path", "brain/state", "world/summary",
-          "memory/", "telemetry/", "task/status")
+          "memory/", "telemetry/", "task/status", "fleet/peers", "safety/violation", "recorder/", "sim/collision")
 
 
 class Telemetry(Module):
@@ -23,7 +25,16 @@ class Telemetry(Module):
 
     async def setup(self, ctx: Context) -> None:
         self.ctx = ctx
+        self.events: deque = deque(maxlen=40)         # last notable messages, independent of bus history depth
+        self._sub = ctx.bus.subscribe("*", self._on_any, name="telemetry.events")
         ctx.extras["telemetry"] = self
+
+    async def teardown(self) -> None:
+        self.ctx.bus.unsubscribe(self._sub)
+
+    def _on_any(self, msg) -> None:
+        if not msg.topic.startswith(_NOISY):
+            self.events.append(msg.to_dict())
 
     def build(self) -> dict:
         ctx = self.ctx
@@ -70,7 +81,7 @@ class Telemetry(Module):
                     "errors": bus.stats.handler_errors, "topics": bus.topics()},
             "scheduler": self._scheduler.describe() if self._scheduler else None,
             "skills": ctx.extras["skills"].describe() if "skills" in ctx.extras else [],
-            "recent": [m.to_dict() for m in bus.history("*", 25) if not m.topic.startswith(_NOISY)],
+            "recent": list(self.events)[-25:],
         }
         return snap
 
