@@ -1,0 +1,17 @@
+# At t=5 the range sensor starts throwing; perception should go to FAULT,
+# the watchdog should restart it, and the safety gate must keep the robot
+# from driving blind (front clearance stops updating -> stale value kept).
+name = "cyberdyne-fault"
+
+[brain]
+patrol = [ { x = 8.0, y = 8.0 }, { x = 1.0, y = 1.0 } ]
+
+[[events]]
+at = 5.0
+topic = "sim/inject_fault"
+payload = { device = "range", enabled = true }
+
+[[events]]
+at = 9.0
+topic = "sim/inject_fault"
+payload = { device = "range", enabled = false }
