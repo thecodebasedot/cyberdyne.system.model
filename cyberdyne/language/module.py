@@ -51,4 +51,6 @@ class LanguageModule(Module):
             await bus.publish("language/intent", intent.to_dict(), source=self.name)
             await bus.publish("skill/invoke", {"skill": intent.skill, "args": args,
                                                "confirmed": bool(utt.get("confirmed")),
+                                               "trust": str(utt.get("trust", "owner")),
+                                               "speaker": utt.get("speaker"),
                                                "request_id": utt.get("request_id")}, source=self.name)

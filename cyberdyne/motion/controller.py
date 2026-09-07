@@ -72,7 +72,9 @@ class MotionController(Module):
         if wm is None or self.goal is None:
             self.path = []
             return
-        self.path = self.planner.plan(wm.grid, (pose["x"], pose["y"]), (self.goal["x"], self.goal["y"]))
+        space = self.ctx.config.social.personal_space
+        people = [(p["x"], p["y"], space, 6.0) for p in self.ctx.bus.latest_payload("perception/people", []) or []]
+        self.path = self.planner.plan(wm.grid, (pose["x"], pose["y"]), (self.goal["x"], self.goal["y"]), people)
         await self.ctx.bus.publish("nav/path", {"points": self.path, "goal": self.goal}, source=self.name)
 
     def _local_target(self, pose: dict) -> tuple[float, float]:
@@ -131,6 +133,12 @@ class MotionController(Module):
 
         ang = max(-self.max_ang, min(self.max_ang, 2.5 * steer))
         speed_scale = min(1.0, free / self.clear_needed) * max(0.0, math.cos(steer))
+        # social: slow down inside anyone's personal space
+        space = self.ctx.config.social.personal_space
+        for person in bus.latest_payload("perception/people", []) or []:
+            d = math.hypot(person["x"] - pose["x"], person["y"] - pose["y"])
+            if d < space * 1.5:
+                speed_scale *= max(0.25, d / (space * 1.5))
         lin = min(self.max_lin * speed_scale, max(0.15, dist))
         if abs(steer) > math.radians(60):          # turn in place first
             lin = 0.0

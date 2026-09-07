@@ -13,6 +13,7 @@ from .cognition.brain import Brain
 from .cognition.llm import LLMBackend, build_backend
 from .cognition.llm_planner import LLMPlanner
 from .hal.registry import DeviceRegistry
+from .hal.serial import build_serial_devices
 from .hal.virtual import build_virtual_devices
 from .kernel.bus import MessageBus
 from .kernel.clock import Clock, SimClock, WallClock
@@ -23,17 +24,20 @@ from .kernel.state import StateMachine, SystemState
 from .kernel.watchdog import Watchdog
 from .language.llm_interpreter import LLMInterpreter
 from .language.module import LanguageModule
+from .language.voice import VoiceModule
 from .memory.module import MemoryModule
 from .motion.controller import MotionController
 from .observability.dashboard import Dashboard
 from .observability.telemetry import Telemetry
 from .perception.range import RangePerception
 from .perception.sensors import SensorHub
+from .perception.vision import VisionPerception
 from .safety.core import SafetyCore, SafetyGate
 from .sim.scenario import ScenarioEvents
-from .sim.world import Obstacle, Pose, World
+from .sim.world import Actor, Obstacle, Pose, World
 from .skills.registry import SkillRegistry
 from .skills.runner import SkillRunner
+from .social.module import SocialModule
 from .world_model.module import WorldModel
 
 log = logging.getLogger("cyberdyne.runtime")
@@ -55,9 +59,11 @@ class SimStepper:
         async def setup(self, ctx) -> None:
             self.ctx = ctx
             self._sub = ctx.bus.subscribe("sim/inject_fault", self._on_inject, name="sim.inject")
+            self._sub2 = ctx.bus.subscribe("sim/hear", self._on_hear, name="sim.hear")
 
         async def teardown(self) -> None:
             self.ctx.bus.unsubscribe(self._sub)
+            self.ctx.bus.unsubscribe(self._sub2)
 
         def _on_inject(self, msg) -> None:
             """Chaos hook: {"device": "range", "enabled": bool}."""
@@ -66,12 +72,33 @@ class SimStepper:
                 if dev.kind.value == p.get("device") and hasattr(dev, "fault_injected"):
                     dev.fault_injected = bool(p.get("enabled", True))
 
+        def _on_hear(self, msg) -> None:
+            """Scenario hook: {"text": ..., "signature": ...} -> the virtual microphone."""
+            p = msg.payload or {}
+            for dev in self.ctx.devices.all():
+                if hasattr(dev, "inject"):
+                    dev.inject(str(p.get("text", "")), str(p.get("signature", "")), float(p.get("loudness", 1.0)))
+
         async def tick(self, dt: float) -> None:
             self.world.step(dt)
             if self.world.last_collision:
                 await self.ctx.bus.publish("sim/collision", {"count": self.world.collisions,
                                                              "pose": self.world.robot.to_dict()},
                                            source=self.name)
+
+
+class LoopbackStepper(SimStepper._M):
+    """Advances the fake firmware in lock-step with the kernel clock (serial mode + loopback)."""
+    name = "loopback_firmware"
+    rate_hz = 100.0
+    priority = 2
+
+    def __init__(self, transport) -> None:
+        super().__init__()
+        self.transport = transport
+
+    async def tick(self, dt: float) -> None:
+        self.transport.advance(dt)
 
 
 class Runtime:
@@ -89,13 +116,20 @@ class Runtime:
         self.devices = DeviceRegistry()
         self.safety = SafetyCore(self.config.safety)
         self.world: World | None = None
+        self.bridge = None
         if k.mode == "sim":
             w = self.config.world
-            self.world = World(w.width, w.height, [Obstacle(**o) for o in w.obstacles],
-                               Pose(**w.robot_start), charger=(w.charger["x"], w.charger["y"]))
+            self.world = World(width=w.width, height=w.height, obstacles=[Obstacle(**o) for o in w.obstacles],
+                               actors=[Actor(a["id"], a.get("kind", "person"), a["x"], a["y"],
+                                             a.get("signature", ""), [tuple(p) for p in a.get("route", [])],
+                                             a.get("speed", 0.5), a.get("radius", 0.3), a.get("active_from", 0.0))
+                                       for a in w.actors],
+                               robot=Pose(**w.robot_start), charger=(w.charger["x"], w.charger["y"]))
             build_virtual_devices(self.world, w, self.devices)
-        else:  # pragma: no cover - real hardware drivers land in a later phase
-            raise NotImplementedError("real hardware backend not implemented yet; use mode='sim'")
+        elif k.mode == "serial":
+            self.bridge = build_serial_devices(self.config.hardware, self.devices)
+        else:
+            raise ValueError(f"unknown kernel mode {k.mode!r}; use 'sim' or 'serial'")
         self.ctx = Context(clock, self.bus, self.config, self.state, self.devices, self.safety, self.world)
         self.scheduler = Scheduler(clock, self.bus, self.ctx)
         self._build_modules()
@@ -114,8 +148,15 @@ class Runtime:
         mods = [SafetyGate(), self.watchdog, SensorHub(), RangePerception(), self.world_model,
                 MotionController(), SkillRunner(registry), self.brain, LanguageModule(interpreter),
                 MemoryModule(), self.telemetry]
+        from .hal.interfaces import DeviceKind
+        if self.devices.has(DeviceKind.CAMERA):
+            mods += [VisionPerception(), SocialModule()]
+        if self.devices.has(DeviceKind.MIC) or self.devices.has(DeviceKind.SPEAKER):
+            mods.append(VoiceModule())
         if self.world is not None:
             mods.append(SimStepper.Module(self.world))
+        if self.bridge is not None and hasattr(self.bridge.t, "advance"):
+            mods.append(LoopbackStepper(self.bridge.t))
         if self.config.events:
             mods.append(ScenarioEvents())
         self.dashboard: Dashboard | None = None
@@ -169,6 +210,7 @@ class Runtime:
                 "pose": self.bus.latest_payload("sensor/odometry"),
                 "brain": self.bus.latest_payload("brain/state"),
                 "world": self.world.to_dict() if self.world else None,
+                "room": self.world_model.current_room,
                 "estop": self.safety.describe()["estop"],
                 "audit": {"entries": len(self.safety.audit), "chain_ok": ok, "first_bad": bad},
                 "bus": {"published": self.bus.stats.published, "errors": self.bus.stats.handler_errors},

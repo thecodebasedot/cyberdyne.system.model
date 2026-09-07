@@ -167,3 +167,33 @@ class ForgetSkill(Skill):
         result = mem.forget(about)
         ctx.safety.audit.record(ctx.now, "memory", "forget", about=about, **result)
         return SkillResult(True, {"forgot": about, **result})
+
+
+class FindSkill(Skill):
+    manifest = SkillManifest("find", description="Where is a person, object or room?",
+                             args={"name": "what to look for"}, tags=("world",))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        wm = ctx.extras.get("world_model")
+        name = str(args.get("name", "")).strip()
+        if wm is None or not name:
+            return SkillResult(False, error="find needs a name and the world model")
+        e = wm.find(name)
+        if e is None:
+            return SkillResult(True, {"found": False, "speech": f"I have not seen {name}."})
+        age = ctx.now - e["last_seen"]
+        where = f"in the {e['attrs'].get('room')}" if e["attrs"].get("room") else f"at ({e['x']:.1f}, {e['y']:.1f})"
+        when = "now" if age < 5 else f"{age:.0f} seconds ago"
+        return SkillResult(True, {"found": True, "entity": e,
+                                  "speech": f"I last saw {name} {where}, {when}."})
+
+
+class ArmSkill(Skill):
+    manifest = SkillManifest("arm", description="Arm or disarm security mode",
+                             args={"armed": "true|false"}, tags=("security",))
+
+    async def run(self, ctx: Context, args: dict[str, Any]) -> SkillResult:
+        armed = str(args.get("armed", "true")).lower() in ("1", "true", "yes", "on")
+        await ctx.bus.publish("security/arm", {"armed": armed}, source="skill.arm")
+        ctx.safety.audit.record(ctx.now, "skills", "security.arm", armed=armed)
+        return SkillResult(True, {"armed": armed, "speech": "Security armed." if armed else "Security disarmed."})

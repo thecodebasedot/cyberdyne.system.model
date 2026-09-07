@@ -49,6 +49,14 @@ class RulePlanner(Planner):
         if m:
             return Plan(goal, [PlanStep("goto", {"x": float(m[1]), "y": float(m[2]),
                                                  "name": m[3] or "user"})], "direct navigation request")
+        m = re.match(r"^(?:goto|go to|find|go near)\s+([\w ]+?)$", g)
+        if m:
+            name = m[1].strip()
+            places = {k.lower(): v for k, v in (context.get("places") or {}).items()}
+            if name in places:
+                x, y = places[name]
+                return Plan(goal, [PlanStep("goto", {"x": x, "y": y, "name": name})], f"'{name}' is a known place")
+            return Plan(goal, [], f"I don't know where '{name}' is")
         if g in ("stop", "halt"):
             return Plan(goal, [PlanStep("estop", {"reason": "planner"})], "user asked to stop")
         return Plan(goal, [], "no rule matched")

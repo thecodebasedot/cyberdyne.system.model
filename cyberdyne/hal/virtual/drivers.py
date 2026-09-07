@@ -5,7 +5,22 @@ import random
 
 from ...kernel.config import WorldConfig
 from ...sim.world import Twist, World
-from ..interfaces import IMU, Battery, BatteryReading, DriveBase, IMUReading, Odometry, RangeSensor, ScanPoint
+from ..interfaces import (
+    IMU,
+    Battery,
+    BatteryReading,
+    Camera,
+    Detection,
+    DriveBase,
+    Frame,
+    IMUReading,
+    Microphone,
+    Odometry,
+    RangeSensor,
+    ScanPoint,
+    Speaker,
+    Utterance,
+)
 from ..registry import DeviceRegistry
 
 
@@ -91,8 +106,68 @@ class VirtualIMU(IMU):
         return IMUReading(self.world.robot.theta, self.world.cmd.angular)
 
 
+class VirtualCamera(Camera):
+    """Sees world actors inside the field of view, occluded by static obstacles.
+
+    Returns detections directly (the "detector" is perfect up to range-scaled
+    confidence and bearing noise); a real camera returns pixels and a
+    detector module fills the same ``Detection`` list.
+    """
+    device_id = "camera.virtual"
+
+    def __init__(self, world: World, fov: float = 1.2, max_range: float = 6.0, noise: float = 0.02,
+                 seed: int = 1) -> None:
+        self.world = world
+        self.fov, self.max_range, self.noise = fov, max_range, noise
+        self._rng = random.Random(seed)
+        self.fault_injected = False
+
+    async def capture(self) -> Frame:
+        if self.fault_injected:
+            raise OSError("camera fault (injected)")
+        dets = []
+        for a in self.world.active_actors():
+            vis, bearing, dist = self.world.visible(a, self.fov, self.max_range)
+            if not vis:
+                continue
+            conf = max(0.3, 1.0 - dist / self.max_range)
+            dets.append(Detection(a.kind, a.kind, bearing + self._rng.gauss(0, self.noise),
+                                  dist + self._rng.gauss(0, self.noise * 5), round(conf, 2),
+                                  a.signature if conf > 0.5 else ""))       # far away: no identity
+        return Frame(self.world.time, 640, 480, dets)
+
+
+class VirtualMicrophone(Microphone):
+    """Utterances are injected by the scenario (``sim/hear`` events)."""
+    device_id = "mic.virtual"
+
+    def __init__(self, world: World) -> None:
+        self.world = world
+        self._queue: list[Utterance] = []
+
+    def inject(self, text: str, signature: str = "", loudness: float = 1.0) -> None:
+        self._queue.append(Utterance(text, self.world.time, signature, loudness))
+
+    async def listen(self) -> list[Utterance]:
+        out, self._queue = self._queue, []
+        return out
+
+
+class VirtualSpeaker(Speaker):
+    device_id = "speaker.virtual"
+
+    def __init__(self) -> None:
+        self.spoken: list[tuple[str, str]] = []
+
+    async def say(self, text: str, voice: str = "neutral") -> None:
+        self.spoken.append((voice, text))
+
+
 def build_virtual_devices(world: World, cfg: WorldConfig, registry: DeviceRegistry) -> None:
     registry.register(VirtualDrive(world))
     registry.register(VirtualRangeSensor(world))
     registry.register(VirtualBattery(world, cfg))
     registry.register(VirtualIMU(world))
+    registry.register(VirtualCamera(world))
+    registry.register(VirtualMicrophone(world))
+    registry.register(VirtualSpeaker())

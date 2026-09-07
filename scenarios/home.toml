@@ -1,0 +1,87 @@
+# A flat with three rooms, the owner walking around, keys on the table, and
+# a stranger who walks in while security is armed. Speech comes through the
+# virtual microphone (sim/hear) with speaker signatures.
+name = "cyberdyne-home"
+
+[world]
+width = 10.0
+height = 8.0
+robot_start = { x = 1.0, y = 1.0, theta = 0.0 }
+charger = { x = 0.6, y = 0.6 }
+battery_start = 0.9
+obstacles = [ { x = 6.0, y = 3.5, w = 1.2, h = 0.8, name = "table" } ]
+rooms = [
+  { name = "hall",    x = 0.0, y = 0.0, w = 4.0,  h = 8.0 },
+  { name = "kitchen", x = 4.0, y = 0.0, w = 6.0,  h = 3.0 },
+  { name = "living",  x = 4.0, y = 3.0, w = 6.0,  h = 5.0 },
+]
+
+[[world.actors]]
+id = "ijtihad"
+kind = "person"
+x = 2.5
+y = 4.0
+signature = "face:ijtihad"
+route = [ [2.5, 4.0], [2.5, 6.5], [7.0, 6.5], [7.0, 4.5] ]
+speed = 0.4
+
+[[world.actors]]
+id = "keys"
+kind = "object"
+x = 6.6
+y = 4.5
+signature = "obj:keys"
+
+[[world.actors]]
+id = "stranger"
+kind = "person"
+x = 9.0
+y = 1.0
+signature = "face:unknown-7"
+route = [ [9.0, 1.0], [5.0, 1.5] ]
+speed = 0.3
+active_from = 40.0
+
+[brain]
+patrol = [ { x = 2.0, y = 6.0 }, { x = 8.0, y = 6.0 }, { x = 8.0, y = 1.5 } ]
+
+[social]
+known = [ { name = "Ijtihad", signature = "face:ijtihad", trust = "owner" },
+          { name = "Rafi",    signature = "voice:rafi",    trust = "guest" },
+          { name = "keys",    signature = "obj:keys" } ]
+require_wake_word = true
+armed = false
+
+[[events]]
+at = 12.0
+topic = "sim/hear"
+payload = { text = "hey cyberdyne, amar keys kothay", signature = "face:ijtihad" }
+
+[[events]]
+at = 14.0
+topic = "sim/hear"
+# not addressed to the robot: overheard, ignored
+payload = { text = "nice weather today", signature = "face:ijtihad" }
+
+[[events]]
+at = 16.0
+topic = "sim/hear"
+# a guest may not arm security
+payload = { text = "cyberdyne pahara dao", signature = "voice:rafi" }
+
+[[events]]
+at = 18.0
+topic = "sim/hear"
+# the owner may, but arm is confirm-tier: denied without confirmation
+payload = { text = "cyberdyne pahara dao", signature = "face:ijtihad" }
+
+[[events]]
+at = 20.0
+topic = "language/utterance"
+# confirmed from the dashboard
+payload = { text = "arm", confirmed = true, trust = "owner" }
+
+[[events]]
+at = 22.0
+topic = "sim/hear"
+payload = { text = "robot kitchen e jao", signature = "face:ijtihad" }

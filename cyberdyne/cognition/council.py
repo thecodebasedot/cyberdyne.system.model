@@ -64,6 +64,8 @@ class Perceiver:
             "world": {"width": w.width, "height": w.height, "charger": w.charger,
                       "keep_out": ctx.config.safety.keep_out},
             "known_entities": wm.entities.all() if wm else [],
+            "places": wm.places() if wm else {},
+            "room": wm.current_room if wm else None,
             "explored": round(wm.grid.explored_fraction(), 2) if wm else None,
             "patrol": ctx.config.brain.patrol,
             "skills": [{"name": s["name"], "args": s["args"], "description": s["description"]}

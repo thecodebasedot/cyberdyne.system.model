@@ -59,8 +59,8 @@ class MentalSimulator:
         w = self.config.world
         obstacles = [Obstacle(c * grid.res, r * grid.res, grid.res, grid.res, "belief")
                      for c, r in grid.occupied_cells()]
-        return World(w.width, w.height, obstacles, Pose(pose["x"], pose["y"], pose["theta"]),
-                     charger=(w.charger["x"], w.charger["y"]))
+        return World(width=w.width, height=w.height, obstacles=obstacles,
+                     robot=Pose(pose["x"], pose["y"], pose["theta"]), charger=(w.charger["x"], w.charger["y"]))
 
     def rollout(self, plan: Plan, grid: OccupancyGrid, pose: dict, battery: float) -> Rollout:
         self.rollouts += 1

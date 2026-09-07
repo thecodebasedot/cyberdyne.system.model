@@ -75,6 +75,46 @@ FORBIDDEN in the permission policy).
   entry. Boot, shutdown, e-stops, violations, module faults/restarts, brain
   mode changes and logged skill invocations all land here.
 
+## Body (Phase 3)
+
+* **Actors** in the sim world: people with looping routes and static
+  objects. The range sensor sees them (dynamic obstacles), the camera sees
+  them inside its field of view unless a static obstacle occludes them, and
+  they yield rather than walk through the robot.
+* **Camera / Microphone / Speaker** HAL interfaces. The virtual camera
+  returns `Detection`s directly (bearing, distance, confidence, identity
+  signature only when close enough); a real camera returns pixels and a
+  detector fills the same list.
+* **VisionPerception** runs an `EntityTracker`: nearest-neighbour
+  association in world coordinates, persistent ids, exponential smoothing,
+  expiry. Publishes `perception/tracks` and `perception/people`.
+* **SocialModule** maps track signatures to people through the
+  `IdentityRegistry` (name, trust). Known people get greeted once per
+  cooldown; in armed security mode a signature nobody matches raises
+  `security/alert` (a missing signature just means "too far to tell").
+  Every track is pushed to the world model as an entity with its room.
+* **VoiceModule** drains the microphone, strips wake words, attaches speaker
+  name and trust, and publishes `language/utterance`. With
+  `require_wake_word` on, unaddressed speech is only logged as
+  `speech/overheard`. It also speaks: `speech/say`, the brain's questions,
+  and skill results that carry a `speech` field.
+* **Trust ceilings**: `PermissionPolicy.check(action, confirmed, trust)`.
+  Owners may reach CONFIRM, guests LOG, unknown speakers FREE (all
+  configurable). The `SkillRunner` carries the utterance's trust through.
+* **Rooms**: named rectangles in `[world] rooms`. The world model labels
+  the robot's current room (`world/room`) and every entity's last-seen
+  room. `find <name>` answers "where is X" with room and age; `goto <place>`
+  resolves names through `WorldModel.places()` (rooms, charger, waypoints,
+  recognised people, tracked objects).
+* **Social navigation**: `GridPlanner.plan(..., soft=[(x, y, radius, weight)])`
+  adds personal-space cost around people; the local controller scales speed
+  down inside 1.5x personal space.
+* **Serial backend** (`hal/serial`): a line protocol to a microcontroller,
+  `SerialDrive` / `SerialRangeSensor` / `SerialBattery`, a `LoopbackTransport`
+  fake firmware for tests, and `calibrate_drive` to derive odometry scale
+  factors. `mode = "serial"` in `[kernel]` swaps the whole HAL. See
+  `docs/HARDWARE.md`.
+
 ## Perception → World model → Memory
 
 * `SensorHub` publishes `sensor/odometry|battery|imu`.
@@ -209,6 +249,13 @@ module health, events, audit chain. Commands go back through the bus
 | `sensor/battery` | SensorHub | `{level, charging, voltage}` |
 | `perception/scan` | RangePerception | `[{angle, distance}]` |
 | `perception/front_clearance` | RangePerception | metres |
+| `perception/detections`, `perception/tracks`, `perception/people` | VisionPerception | |
+| `social/recognised`, `security/alert`, `speech/say` | SocialModule | |
+| `speech/said`, `speech/overheard` | VoiceModule | |
+| `world/observe` | SocialModule -> WorldModel | `{id, kind, x, y, attrs}` |
+| `world/room` | WorldModel | `{name}` |
+| `security/arm` | `arm` skill | `{armed}` |
+| `sim/hear` | scenario -> virtual microphone | `{text, signature}` |
 | `world/summary` | WorldModel | `{explored, entities, grid_updates}` |
 | `brain/goal` | skills / users | `{goal: "...", confirmed?}` |
 | `brain/decision` | Brain (council) | `Decision.to_dict()` |
@@ -240,7 +287,8 @@ module health, events, audit chain. Commands go back through the bus
 | Self-modification (E) | `learning/`, `skills/` | `Learner.propose`, `self.modify` FORBIDDEN gate |
 | Runtime verification, shielded RL (F) | `safety/` | `SafetyGate` as sole actuator writer |
 | Robot society / fleet economy (G) | `fleet/` | `FleetMessage`, `Transport` |
-| Deep human modelling (H) | `world_model/entities.py`, `memory/` | `EntityStore` |
+| Deep human modelling (H) | `social/`, `world_model/entities.py`, `memory/` | `IdentityRegistry`, trust, `EntityStore` with rooms |
+| Custom silicon / real drivers (B) | `hal/serial`, `hal/calibration.py` | line protocol, loopback firmware, calibration |
 | Security hardening, immune system (I, J) | `safety/audit.py`, `kernel/watchdog.py` | hash chain, restart budget |
 | Simulation at scale, digital twin (K, L) | `sim/`, `scenarios/` | scenario DSL, fault injection |
 | Compliance and ethics (M) | `safety/permissions.py`, audit | tiers + tamper-evident log |

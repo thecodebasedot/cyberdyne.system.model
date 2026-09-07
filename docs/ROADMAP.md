@@ -26,13 +26,17 @@
 - [x] Dashboard: council panel, question/answer box, `/api/plan`, `/api/answer`; `council` scenario; 10 tests
 - Deferred to Phase 4: multi-turn dialogue memory for the LLM interpreter; learned confidence calibration
 
-## Phase 3 — Body
-- [ ] Camera device + object/face detection module; entity tracking with IDs
-- [ ] Microphone / speaker devices; wake word; TTS
-- [ ] Semantic SLAM (rooms, labels) on top of the occupancy grid
-- [ ] PyBullet/MuJoCo backend behind the same HAL
-- [ ] Raspberry Pi backend (GPIO motors, ultrasonic, IMU) + calibration pipeline
-- [ ] Social navigation costs (personal space) in the planner
+## Phase 3 — Body (done in simulation; serial backend ready for a board)
+- [x] Sim actors: people on routes and objects, seen by the range sensor and the camera, occluded by walls, yield to the robot
+- [x] `Camera` / `Microphone` / `Speaker` HAL interfaces + virtual drivers; `Detection`/`Frame`/`Utterance` types
+- [x] `VisionPerception` with `EntityTracker` (persistent ids, gating, smoothing, expiry); `perception/tracks`, `perception/people`
+- [x] `SocialModule` + `IdentityRegistry`: recognise known people, greet (rate-limited), security mode alerts on strangers
+- [x] `VoiceModule`: wake-word gating, speaker identity and trust on every utterance, robot speaks questions/results
+- [x] Trust-gated permissions: owner / guest / unknown ceilings on skill tiers
+- [x] Rooms in the world model, room labels on every entity, `find` skill ("amar keys kothay"), place-name goals ("kitchen e jao")
+- [x] Social navigation: personal-space cost layer in A*, slow-down near people
+- [x] Serial bridge backend (line protocol, `LoopbackTransport` fake firmware, pyserial optional), `mode = "serial"`, drive calibration; docs/HARDWARE.md
+- Follow-ups: real camera (OpenCV + detector), real mic (Whisper/Vosk), TTS, IMU over serial, PyBullet backend, Raspberry Pi GPIO drivers
 
 ## Phase 4 — Skills and learning
 - [ ] Skill composition and long-horizon tasks with interrupt/resume

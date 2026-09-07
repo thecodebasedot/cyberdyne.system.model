@@ -43,6 +43,10 @@ class Telemetry(Module):
                          if (bus.latest_payload("brain/state") or {}).get("question") else None),
             "llm": ctx.extras["llm"].describe() if ctx.extras.get("llm") else None,
             "facts": mem.semantic.all()[-10:] if mem else [],
+            "tracks": bus.latest_payload("perception/tracks", []),
+            "room": bus.latest_payload("world/room"),
+            "speech": [m.payload for m in bus.history("speech/said", 6)],
+            "alerts": [m.payload for m in bus.history("security/alert", 5)],
             "scan": bus.latest_payload("perception/scan"),
             "front_clearance": bus.latest_payload("perception/front_clearance"),
             "cmd": bus.latest_payload("motion/cmd_applied"),
@@ -56,7 +60,7 @@ class Telemetry(Module):
             "skills": ctx.extras["skills"].describe() if "skills" in ctx.extras else [],
             "recent": [m.to_dict() for m in bus.history("*", 25)
                        if not m.topic.startswith(("sensor/", "perception/", "motion/", "nav/status", "nav/path",
-                                                  "brain/state", "world/", "memory/"))],
+                                                  "brain/state", "world/summary", "memory/", "telemetry/"))],
         }
         return snap
 

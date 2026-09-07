@@ -23,7 +23,7 @@ class SafetyCore:
         self.cfg = cfg
         self.envelope = SafetyEnvelope(cfg)
         self.estop = EStop()
-        self.permissions = PermissionPolicy(cfg.permissions)
+        self.permissions = PermissionPolicy(cfg.permissions, cfg.guest_max_tier, cfg.unknown_max_tier)
         self.audit = AuditLog()
 
     def describe(self) -> dict:

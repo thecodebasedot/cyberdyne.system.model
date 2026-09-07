@@ -41,16 +41,18 @@ class SkillRunner(Module):
     def _on_invoke(self, msg) -> None:
         self._queue.append(dict(msg.payload))
 
-    async def invoke(self, name: str, args: dict | None = None, confirmed: bool = False) -> SkillResult:
+    async def invoke(self, name: str, args: dict | None = None, confirmed: bool = False,
+                     trust: str = "owner") -> SkillResult:
         args = args or {}
         try:
             skill = self.registry.get(name)
-            tier = self.ctx.safety.permissions.check(skill.manifest.permission, confirmed=confirmed)
+            tier = self.ctx.safety.permissions.check(skill.manifest.permission, confirmed=confirmed, trust=trust)
         except (KeyError, PermissionDenied) as exc:
-            self.ctx.safety.audit.record(self.ctx.now, "skills", "denied", skill=name, error=str(exc))
+            self.ctx.safety.audit.record(self.ctx.now, "skills", "denied", skill=name, error=str(exc), trust=trust)
             return SkillResult(False, error=str(exc))
         if tier in (Tier.LOG, Tier.CONFIRM):
-            self.ctx.safety.audit.record(self.ctx.now, "skills", "invoke", skill=name, args=args, tier=tier.value)
+            self.ctx.safety.audit.record(self.ctx.now, "skills", "invoke", skill=name, args=args, tier=tier.value,
+                                         trust=trust)
         try:
             result = await asyncio.wait_for(skill.run(self.ctx, args), self.timeout)
         except TimeoutError:
@@ -63,7 +65,8 @@ class SkillRunner(Module):
     async def tick(self, dt: float) -> None:
         while self._queue:
             req = self._queue.pop(0)
-            res = await self.invoke(req.get("skill", ""), req.get("args"), bool(req.get("confirmed")))
+            res = await self.invoke(req.get("skill", ""), req.get("args"), bool(req.get("confirmed")),
+                                    str(req.get("trust", "owner")))
             await self.ctx.bus.publish("skill/result", {"skill": req.get("skill"),
                                                         "request_id": req.get("request_id"),
                                                         **res.to_dict()}, source=self.name)

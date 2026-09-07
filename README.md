@@ -16,8 +16,15 @@ planner and interpreter can be Claude (official SDK, optional) or rules;
 rules remain the fallback and the guardrail either way. Memory grows a
 knowledge graph, vector search and a `forget` primitive.
 
-Every later layer of the design (real hardware, learning, fleets, formal
-verification) plugs into contracts that already exist.
+Phase 3 gives it a body: a camera, microphone and speaker in the HAL; people
+and objects in the simulation; vision tracking with persistent ids; face-style
+identity with owner / guest / unknown trust that gates what a speaker may
+ask; wake-word voice control that talks back; rooms and "where are my keys";
+social navigation that gives people space; and a serial bridge to a real
+microcontroller with a fake firmware for tests and a calibration routine.
+
+Every later layer of the design (learning, fleets, formal verification)
+plugs into contracts that already exist.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -33,7 +40,7 @@ Python 3.11+, no runtime dependencies.
 pip install -e ".[dev]"
 
 cyberdyne check                       # boot, self-test, 1 s of sim, JSON report
-cyberdyne scenario list               # patrol, estop_drill, voice, sensor_fault, council
+cyberdyne scenario list               # patrol, estop_drill, voice, sensor_fault, council, home
 cyberdyne run -s patrol -t 300        # 300 sim-seconds as fast as possible
 cyberdyne run -s patrol -d            # real-time with the dashboard on http://127.0.0.1:8080
 cyberdyne say "go to 8 2"             # one-shot command, 20 s run, report
@@ -94,6 +101,11 @@ E-STOP / RESET.
   restarts the failed module and the robot carries on.
 * Takes commands in English or romanised Bangla, runs them as permissioned
   skills, and remembers what happened (episodic + working + semantic memory).
+* Sees people and objects, tracks them, greets the people it knows, raises an
+  alert on strangers when armed, remembers which room it last saw things in,
+  and answers "amar keys kothay".
+* Listens for its wake word, knows who is talking, and refuses requests the
+  speaker's trust level does not allow.
 * Deliberates on free-form goals: refuses goals into keep-out zones or
   obstacles outright, asks before confirm-tier actions or when its own
   prediction is shaky, accepts `proceed` / `cancel` / a new goal, and can
@@ -104,16 +116,17 @@ E-STOP / RESET.
 ```
 cyberdyne/
   kernel/         clock, bus, module, scheduler, watchdog, state machine, config
-  hal/            device interfaces, registry, virtual/ backend
+  hal/            device interfaces, registry, virtual/ backend, serial/ backend, calibration
   sim/            2D world, scenario loader + scripted events
   safety/         envelope, e-stop, permissions, audit log, SafetyGate
-  perception/     sensor hub, range perception
+  perception/     sensor hub, range perception, vision + entity tracker
   world_model/    occupancy grid, entity store
   memory/         working + episodic (vector search) + semantic (knowledge graph)
   cognition/      behaviour tree, planner, brain, council, constitution, mental simulation, LLM seam
   motion/         A* grid planner, local controller
   skills/         manifests, registry, runner, builtin/
-  language/       rule interpreter, LLM interpreter, language module
+  language/       rule interpreter, LLM interpreter, language module, voice module
+  social/         identity registry (trust), social module
   observability/  telemetry, dashboard (+ dashboard.html)
   learning/       reserved (Phase 4)
   fleet/          reserved (Phase 5)
@@ -121,7 +134,7 @@ cyberdyne/
   cli.py
 scenarios/        *.toml scenarios
 tests/            unit + end-to-end
-docs/             ARCHITECTURE.md, ROADMAP.md
+docs/             ARCHITECTURE.md, ROADMAP.md, HARDWARE.md
 ```
 
 ## Writing a skill
@@ -155,10 +168,16 @@ topic = "language/utterance"
 payload = { text = "jao 2 7" }
 ```
 
+## Real hardware
+
+`mode = "serial"` talks to a microcontroller over a one-line-per-command
+protocol (`VEL`, `ODOM?`, `SCAN?`, `BATT?`). `port = "loopback"` runs a fake
+firmware in-process. See [docs/HARDWARE.md](docs/HARDWARE.md).
+
 ## Development
 
 ```bash
-pytest          # 34 tests, ~5 s
+pytest          # 41 tests, ~8 s
 ruff check .
 ```
 

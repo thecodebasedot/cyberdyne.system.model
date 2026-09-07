@@ -36,6 +36,7 @@
    <button class="ok" onclick="answer('proceed')">PROCEED</button><button class="danger" onclick="answer('cancel')">CANCEL</button>
    <button onclick="answer()">SEND</button></div></section>
   <section><h2>Council</h2><table id="council"></table></section>
+  <section><h2>Social</h2><table id="social"></table></section>
  </div>
  <div class="stack">
   <section><h2>Robot</h2><table id="robot"></table><div class="meter"><i id="batt" style="width:0"></i></div></section>
@@ -60,7 +61,10 @@ function draw(){if(!S||!S.world)return;const w=S.world,sx=cv.width/w.width,sy=cv
  for(let j=0;j<=w.height;j++){cx.beginPath();cx.moveTo(0,Y(j));cx.lineTo(cv.width,Y(j));cx.stroke()}
  if(S.world_model){cx.fillStyle='rgba(255,176,32,.25)';const g=S.world_model.grid;for(const [c,r] of g.occupied)cx.fillRect(c*g.res*sx,Y((r+1)*g.res),g.res*sx,g.res*sy)}
  for(const z of (S.safety.keep_out||[])){cx.fillStyle='rgba(255,59,59,.15)';cx.strokeStyle='#ff3b3b';cx.fillRect(z.x*sx,Y(z.y+z.h),z.w*sx,z.h*sy);cx.strokeRect(z.x*sx,Y(z.y+z.h),z.w*sx,z.h*sy)}
+ if(S.world_model&&S.world_model.rooms)for(const rm of S.world_model.rooms){cx.strokeStyle='#1e3a4a';cx.setLineDash([2,6]);cx.strokeRect(rm.x*sx,Y(rm.y+rm.h),rm.w*sx,rm.h*sy);cx.setLineDash([]);cx.fillStyle='#2c4a5a';cx.fillText(rm.name.toUpperCase(),rm.x*sx+6,Y(rm.y+rm.h)+14)}
  cx.fillStyle='#233346';for(const o of w.obstacles)cx.fillRect(o.x*sx,Y(o.y+o.h),o.w*sx,o.h*sy);
+ for(const a of (w.actors||[])){cx.fillStyle=a.kind==='person'?'rgba(255,255,255,.15)':'rgba(255,176,32,.3)';cx.beginPath();cx.arc(a.x*sx,Y(a.y),a.radius*sx,0,7);cx.fill()}
+ for(const t of (S.tracks||[])){cx.strokeStyle=t.kind==='person'?'#ff7ab6':'#ffb020';cx.lineWidth=2;cx.beginPath();cx.arc(t.x*sx,Y(t.y),0.3*sx,0,7);cx.stroke();cx.lineWidth=1;cx.fillStyle='#ff7ab6';cx.fillText((t.signature?'':'?')+t.kind+'#'+t.track_id,t.x*sx+8,Y(t.y)+4)}
  cx.strokeStyle='#37d67a';cx.beginPath();cx.arc(w.charger.x*sx,Y(w.charger.y),w.charger.r*sx,0,7);cx.stroke();
  if(S.world_model)for(const e of S.world_model.entities){if(e.kind==='waypoint'){cx.fillStyle='#38bdf8';cx.beginPath();cx.arc(e.x*sx,Y(e.y),4,0,7);cx.fill();cx.fillText(e.id,e.x*sx+6,Y(e.y)-4)}}
  const r=w.robot;if(S.scan){cx.strokeStyle='rgba(56,189,248,.25)';for(const p of S.scan){cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));
@@ -78,6 +82,8 @@ async function poll(){try{S=await (await fetch('/api/state')).json();
   cmd:S.cmd,front_clearance:S.front_clearance!=null?S.front_clearance.toFixed(2)+' m':'-',collisions:S.world.collisions,distance:S.world.distance.toFixed(2)+' m',
   explored:S.world_model?S.world_model.grid.explored:'-',bus:S.bus.published+' msgs / '+S.bus.errors+' errors',memory:S.memory});
  kv('brain',S.brain||{});
+ kv('social',{room:S.room?S.room.name:'-',tracks:(S.tracks||[]).map(t=>t.kind+'#'+t.track_id+(t.signature?'':' (unknown)')).join(', ')||'none',
+  said:(S.speech||[]).map(x=>'"'+x.text+'"').join(' '),alerts:(S.alerts||[]).length});
  $('qbox').hidden=!S.question;if(S.question)$('question').textContent=S.question.question+'  ['+S.question.options.join(' / ')+']';
  const d=S.decision;kv('council',d?{goal:d.goal,approved:d.approved,confidence:(d.confidence*100).toFixed(0)+'%',rationale:d.plan.rationale,
   steps:d.plan.steps.map(s=>s.skill+' '+JSON.stringify(s.args)).join(' → '),violations:d.violations.map(v=>v.rule+':'+v.detail).join(', ')||'none',

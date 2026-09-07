@@ -40,10 +40,25 @@ class GridPlanner:
             occ[r * g.cols] = occ[r * g.cols + g.cols - 1] = True
         return occ
 
-    def plan(self, g: OccupancyGrid, start: tuple[float, float], goal: tuple[float, float]
-             ) -> list[tuple[float, float]]:
+    @staticmethod
+    def _soft_cost(g: OccupancyGrid, soft: list[tuple[float, float, float, float]]) -> list[float]:
+        """Per-cell extra cost from (x, y, radius, weight) sources, e.g. people's personal space."""
+        cost = [0.0] * (g.cols * g.rows)
+        for x, y, radius, weight in soft:
+            c0, r0 = int(x / g.res), int(y / g.res)
+            span = int(radius / g.res) + 1
+            for r in range(max(0, r0 - span), min(g.rows, r0 + span + 1)):
+                for c in range(max(0, c0 - span), min(g.cols, c0 + span + 1)):
+                    d = math.hypot((c + 0.5) * g.res - x, (r + 0.5) * g.res - y)
+                    if d < radius:
+                        cost[r * g.cols + c] += weight * (1.0 - d / radius)
+        return cost
+
+    def plan(self, g: OccupancyGrid, start: tuple[float, float], goal: tuple[float, float],
+             soft: list[tuple[float, float, float, float]] | None = None) -> list[tuple[float, float]]:
         self.plans += 1
         occ = self._blocked_mask(g)
+        extra = self._soft_cost(g, soft) if soft else None
         sc, sr = int(start[0] / g.res), int(start[1] / g.res)
         gc, gr = int(goal[0] / g.res), int(goal[1] / g.res)
         if not (0 <= gc < g.cols and 0 <= gr < g.rows):
@@ -71,7 +86,7 @@ class GridPlanner:
                     continue
                 if dc and dr and (occ[cur[1] * g.cols + nc] or occ[nr * g.cols + cur[0]]):
                     continue                # no corner cutting
-                nk, ncost = (nc, nr), cost + w
+                nk, ncost = (nc, nr), cost + w + (extra[nr * g.cols + nc] if extra else 0.0)
                 if ncost < best.get(nk, math.inf):
                     best[nk] = ncost
                     came[nk] = cur
