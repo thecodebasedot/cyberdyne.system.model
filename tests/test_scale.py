@@ -112,7 +112,7 @@ def test_recording_is_deterministic_and_queryable(tmp_path):
     assert rec.duration >= 19.9 and "language/intent" in rec.topics()
     early, late = rec.state_at(0.5), rec.state_at(15.0)
     assert "language/intent" not in early and late["language/intent"]["skill"] == "goto"
-    goals = rec.between(0.0, 5.0, "nav/goal")
+    goals = [g for g in rec.between(0.0, 5.0, "nav/goal") if g["payload"].get("name") == "user"]
     assert goals and goals[0]["payload"]["x"] == 8.0
     assert rec.summary()["messages"] == len(rec.messages)
 

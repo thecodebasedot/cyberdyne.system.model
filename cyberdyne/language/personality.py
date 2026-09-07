@@ -34,4 +34,6 @@ class Personality:
         out = f"{prefix}{filler}{text}".strip()
         if self.cfg.warmth >= 0.8 and voice == "friendly" and not out.endswith("!"):
             out = out.rstrip(".") + "!"
-        return out[0].upper() + out[1:] if out else out
+        if (prefix or filler) and out:
+            out = out[0].upper() + out[1:]
+        return out
