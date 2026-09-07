@@ -92,6 +92,7 @@ usually means the robot asks you before acting.
 ```bash
 cyberdyne say "ranna ghor-er janala-r kache jao"     # rules can't parse it -> Claude maps it to a goal
 cyberdyne say "keno korle"                           # explain the last decision
+cyberdyne eval-llm                                   # score the model on fixed Bangla/English cases
 ```
 
 ## The dashboard
@@ -223,13 +224,17 @@ payload = { text = "jao 2 7" }
 ## Real hardware
 
 `mode = "serial"` talks to a microcontroller over a one-line-per-command
-protocol (`VEL`, `ODOM?`, `SCAN?`, `BATT?`). `port = "loopback"` runs a fake
-firmware in-process. See [docs/HARDWARE.md](docs/HARDWARE.md).
+protocol (`VEL`, `ODOM?`, `SCAN?`, `BATT?`); `firmware/` is the Arduino
+sketch, with its protocol logic compiled and tested on the host.
+`mode = "rpi"` adds a USB camera (OpenCV), an offline microphone (Vosk) and
+text-to-speech on a Raspberry Pi; `scripts/setup_rpi.sh` installs it all
+and `deploy/cyberdyne.service` runs it at boot. `port = "loopback"` runs a
+fake firmware in-process. See [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ## Development
 
 ```bash
-pytest          # 60 tests, ~40 s
+pytest          # 64 tests, ~35 s (live Claude test is skipped without credentials)
 cyberdyne verify
 ruff check .
 ```

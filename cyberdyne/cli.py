@@ -92,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
     fl.add_argument("--duration", "-t", type=float, default=120.0)
     fl.add_argument("--auction", default=None, help="offer this goto target (x,y) to the fleet at t=5")
 
+    ev = sub.add_parser("eval-llm", help="score the LLM interpreter/planner on fixed cases (needs API credentials)")
+    ev.add_argument("--backend", default="anthropic", choices=["anthropic", "scripted"])
+    ev.add_argument("--model", default="claude-opus-5")
+    ev.add_argument("--effort", default="high")
+
     tr = sub.add_parser("train", help="tune the local controller in simulation (shielded by the safety gate)")
     tr.add_argument("--scenario", "-s", default="patrol")
     tr.add_argument("--episodes", "-n", type=int, default=6)
@@ -112,6 +117,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{m['name']:<12} {m['permission']:<20} {m['description']}")
         return 0
 
+    if args.cmd == "eval-llm":
+        from .cognition.eval_llm import main as eval_main
+        rep = eval_main(args.backend, args.model, args.effort)
+        print(json.dumps(rep, indent=2, default=str))
+        return 0 if rep["summary"]["accuracy"] >= 0.8 else 1
     if args.cmd == "verify":
         from .safety.verify import verify_all
         res = verify_all()

@@ -67,6 +67,9 @@ class HardwareConfig:
     baud: int = 115200
     linear_scale: float = 1.0           # odometry calibration
     angular_scale: float = 1.0
+    camera_index: int = 0               # rpi mode: -1 disables the camera
+    vosk_model: str = "model"           # rpi mode: "" disables the microphone
+    tts: bool = True                    # rpi mode: espeak-ng speaker
 
 
 @dataclass

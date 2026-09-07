@@ -138,8 +138,13 @@ class Runtime:
             build_virtual_devices(self.world, w, self.devices)
         elif k.mode == "serial":
             self.bridge = build_serial_devices(self.config.hardware, self.devices)
+        elif k.mode == "rpi":
+            from .hal.rpi import build_rpi_devices
+            h = self.config.hardware
+            self.bridge = build_rpi_devices(h, self.devices, None if h.camera_index < 0 else h.camera_index,
+                                            h.vosk_model or None, h.tts)
         else:
-            raise ValueError(f"unknown kernel mode {k.mode!r}; use 'sim' or 'serial'")
+            raise ValueError(f"unknown kernel mode {k.mode!r}; use 'sim', 'serial' or 'rpi'")
         self.ctx = Context(clock, self.bus, self.config, self.state, self.devices, self.safety, self.world)
         self.scheduler = Scheduler(clock, self.bus, self.ctx)
         self._build_modules()
@@ -203,7 +208,12 @@ class Runtime:
             mem = self.ctx.extras.get("memory")
             for f in self.store.load("facts", []):
                 mem.semantic.add(f["subject"], f["predicate"], f["object"], f.get("source", "store"), f.get("ts", 0.0))
-        failed = [k for k, (ok, _) in results.items() if not ok]
+        critical = {d.device_id for d in self.devices.all() if d.kind.value in ("drive", "range", "battery")}
+        failed = [k for k, (ok, _) in results.items() if not ok and k in critical]
+        degraded = [k for k, (ok, _) in results.items() if not ok and k not in critical]
+        if degraded:
+            log.warning("degraded peripherals: %s", degraded)
+            await self.bus.publish("kernel/degraded", {"devices": degraded}, source="runtime")
         if failed:
             await self.safety.estop.engage(f"self-test failed: {', '.join(failed)}")
             await self.state.transition(SystemState.ESTOP, "diagnostic failure")

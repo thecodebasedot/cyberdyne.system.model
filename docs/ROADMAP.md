@@ -24,7 +24,8 @@
 - [x] Metacognition: confidence threshold, `brain/question` <-> `human/answer`, timeouts, `explain` skill
 - [x] Semantic memory (knowledge graph), vector-backed episodic search, `forget` privacy primitive
 - [x] Dashboard: council panel, question/answer box, `/api/plan`, `/api/answer`; `council` scenario; 10 tests
-- Deferred to Phase 4: multi-turn dialogue memory for the LLM interpreter; learned confidence calibration
+- [x] `cyberdyne eval-llm`: fixed interpreter/planner cases scored against Claude (live test opt-in via credentials); SDK error/refusal paths tested against the real SDK classes
+- Deferred: multi-turn dialogue memory for the LLM interpreter; learned confidence calibration
 
 ## Phase 3 — Body (done in simulation; serial backend ready for a board)
 - [x] Sim actors: people on routes and objects, seen by the range sensor and the camera, occluded by walls, yield to the robot
@@ -36,7 +37,8 @@
 - [x] Rooms in the world model, room labels on every entity, `find` skill ("amar keys kothay"), place-name goals ("kitchen e jao")
 - [x] Social navigation: personal-space cost layer in A*, slow-down near people
 - [x] Serial bridge backend (line protocol, `LoopbackTransport` fake firmware, pyserial optional), `mode = "serial"`, drive calibration; docs/HARDWARE.md
-- Follow-ups: real camera (OpenCV + detector), real mic (Whisper/Vosk), TTS, IMU over serial, PyBullet backend, Raspberry Pi GPIO drivers
+- [x] Arduino firmware (`firmware/`) with host-tested protocol logic; Raspberry Pi backend (`mode = "rpi"`: OpenCV camera, Vosk microphone, espeak speaker), setup script, systemd unit, degraded boot
+- Follow-ups: face-embedding signatures for the real camera, speaker identification, IMU over serial, PyBullet backend
 
 ## Phase 4 — Skills and learning (done)
 - [x] `TaskRunner`: goto / skill / wait / sub-task steps, retries, timeouts, pause/resume, cancel, queue; brain executes plans through it and pauses tasks for battery or e-stop

@@ -58,10 +58,54 @@ result = await calibrate_drive(drive, clock, distance=1.0)   # drives 1 m, turns
 Put the two numbers into `[hardware]`. Calibrate on the floor the robot
 will actually run on; carpet and tile differ.
 
-## What is still virtual
+## Firmware
 
-Camera, microphone and speaker drivers for real hardware are not written
-yet. The interfaces (`Camera.capture -> Frame`, `Microphone.listen ->
-[Utterance]`, `Speaker.say`) are fixed; an OpenCV + detector camera, a
-Whisper/Vosk microphone and a TTS speaker implement them without touching
-anything above the HAL. See ROADMAP Phase 3 follow-ups.
+`firmware/cyberdyne_fw/` is an Arduino sketch (Uno/Mega/ESP32 class).
+`protocol.h` holds everything hardware-independent (line parsing, the
+commands, differential-drive kinematics, odometry integration, the 500 ms
+command watchdog, `ESTOP`) and is compiled on the host by
+`firmware/test/test_protocol.cpp` (run in the test suite when `g++` exists).
+`cyberdyne_fw.ino` binds it to pins:
+
+| Function | Pins (defaults) |
+|---|---|
+| Motor driver (L298N / TB6612) | L: PWM 5, DIR 4; R: PWM 6, DIR 7 |
+| Quadrature encoders | L: A=2 (interrupt), B=8; R: A=3 (interrupt), B=9 |
+| Ultrasonic HC-SR04 x5 (left..right) | TRIG 22,24,26,28,30; ECHO 23,25,27,29,31 |
+| Battery divider | A0 (`BATT_DIVIDER` = (R1+R2)/R2) |
+| Charger sense | D12 |
+| Physical e-stop | cuts the driver's enable line in hardware |
+
+Set `Config` (wheel base, ticks per metre, max wheel speed, battery
+volts) in `protocol.h`, flash, then run the calibration above.
+
+## Raspberry Pi brain
+
+```bash
+git clone <repo> && cd cyberdyne.system.model
+./scripts/setup_rpi.sh          # apt deps, venv, pyserial/opencv/vosk, English Vosk model, robot.toml
+.venv/bin/cyberdyne check -s robot.toml
+.venv/bin/cyberdyne run -s robot.toml -d   # dashboard on http://<pi>:8080
+sudo cp deploy/cyberdyne.service /etc/systemd/system/ && sudo systemctl enable --now cyberdyne
+```
+
+`mode = "rpi"` = the serial body plus:
+
+* `OpenCVCamera`: USB / Pi camera, OpenCV HOG person detector, bearing from
+  box position, distance from box height. No identity signatures yet (add a
+  face-embedding model to fill `Detection.signature`).
+* `VoskMicrophone`: offline speech-to-text in a background thread
+  (English model by default; swap in `vosk-model-small-bn-0.4` for Bangla).
+* `ShellSpeaker`: `espeak-ng` text to speech.
+
+A missing peripheral does not stop the robot: the boot diagnostic reports it
+on `kernel/degraded` and the body still runs. Only drive, range and battery
+failures boot into ESTOP.
+
+## Bill of materials (reference build)
+
+Raspberry Pi 4 (2 GB+), Arduino Mega 2560 (or ESP32), TB6612FNG motor
+driver, 2x DC gear motors with encoders (e.g. 12 V, 200 RPM), 2S/3S LiPo
+with a BMS and a voltage divider, 5x HC-SR04, USB webcam, USB microphone or
+ReSpeaker HAT, small speaker on the Pi's audio jack, a chassis with a caster
+wheel, and a mushroom e-stop wired into the motor driver's enable line.
