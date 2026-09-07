@@ -74,6 +74,7 @@ function draw(){if(!S||!S.world)return;const w=S.world,sx=cv.width/w.width,sy=cv
  if(S.path&&S.path.points&&S.brain&&S.brain.goal){cx.strokeStyle='rgba(255,176,32,.6)';cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));for(const [px,py] of S.path.points)cx.lineTo(px*sx,Y(py));cx.stroke()}
  const g=S.brain&&S.brain.goal;if(g){cx.strokeStyle='#ffb020';cx.setLineDash([4,4]);cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));cx.lineTo(g.x*sx,Y(g.y));cx.stroke();cx.setLineDash([]);
   cx.strokeRect(g.x*sx-5,Y(g.y)-5,10,10)}
+ for(const p of (S.peers||[])){if(p.pose){cx.strokeStyle='#7dd3fc';cx.beginPath();cx.arc(p.pose.x*sx,Y(p.pose.y),0.2*sx,0,7);cx.stroke();cx.fillStyle='#7dd3fc';cx.fillText(p.robot,p.pose.x*sx+8,Y(p.pose.y)-6)}}
  cx.fillStyle=S.safety.estop.engaged?'#ff3b3b':'#37d67a';cx.beginPath();cx.arc(r.x*sx,Y(r.y),0.2*sx,0,7);cx.fill();
  cx.strokeStyle='#fff';cx.beginPath();cx.moveTo(r.x*sx,Y(r.y));cx.lineTo((r.x+0.35*Math.cos(r.theta))*sx,Y(r.y+0.35*Math.sin(r.theta)));cx.stroke()}
 async function poll(){try{S=await (await fetch('/api/state')).json();
@@ -92,7 +93,6 @@ async function poll(){try{S=await (await fetch('/api/state')).json();
  kv('fleet',{peers:(S.peers||[]).map(p=>`${p.robot} [${p.state}]${p.battery?' '+(p.battery.level*100).toFixed(0)+'%':''}`).join(', ')||'none',
   auction:S.auction?`won ${S.auction.won} lost ${S.auction.lost} open ${S.auction.open.length}`:'-',
   release:S.ops&&S.ops.active?`${S.ops.active.version} (${S.ops.active.hash})${S.ops.health_pending?' health check…':''}`:'none'});
- for(const p of (S.peers||[])){if(p.pose){cx.strokeStyle='#7dd3fc';cx.beginPath();cx.arc(p.pose.x*sx,Y(p.pose.y),0.2*sx,0,7);cx.stroke();cx.fillStyle='#7dd3fc';cx.fillText(p.robot,p.pose.x*sx+8,Y(p.pose.y)-6)}}
  kv('social',{room:S.room?S.room.name:'-',tracks:(S.tracks||[]).map(t=>t.kind+'#'+t.track_id+(t.signature?'':' (unknown)')).join(', ')||'none',
   said:(S.speech||[]).map(x=>'"'+x.text+'"').join(' '),alerts:(S.alerts||[]).length});
  $('qbox').hidden=!S.question;if(S.question)$('question').textContent=S.question.question+'  ['+S.question.options.join(' / ')+']';
